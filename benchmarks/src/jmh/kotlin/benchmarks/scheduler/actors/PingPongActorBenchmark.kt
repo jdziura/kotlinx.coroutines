@@ -44,7 +44,7 @@ open class PingPongActorBenchmark : ParametrizedDispatcherBase() {
 
     @Benchmark
     fun coresCountPingPongs() = runBlocking {
-        runPingPongs(Runtime.getRuntime().availableProcessors())
+        runPingPongs(((Runtime.getRuntime().availableProcessors() - 2).coerceAtLeast(1)))
     }
 
     private suspend fun runPingPongs(count: Int) {
