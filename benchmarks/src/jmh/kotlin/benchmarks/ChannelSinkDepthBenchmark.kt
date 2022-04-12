@@ -59,6 +59,7 @@ open class ChannelSinkDepthBenchmark : ParametrizedDispatcherBase() {
 
     // Migrated from deprecated operators, are good only for stressing channels
 
+    @OptIn(InternalCoroutinesApi::class)
     private fun ReceiveChannel<Int>.filter(
         callTraceDepth: Int,
         context: CoroutineContext = Dispatchers.Unconfined,

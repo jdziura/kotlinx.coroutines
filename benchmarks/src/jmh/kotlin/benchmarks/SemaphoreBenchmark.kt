@@ -82,8 +82,8 @@ open class SemaphoreBenchmark {
 
 enum class SemaphoreBenchDispatcherCreator(val create: (parallelism: Int) -> CoroutineDispatcher) {
     FORK_JOIN({ parallelism -> ForkJoinPool(parallelism).asCoroutineDispatcher() }),
-    KOTLIN_DEFAULT({ parallelism -> kotlinx.coroutines.Dispatchers.KotlinDefault }),
-    GO_BASED({ parallelism -> Dispatchers.Default }) // TODO doesn't take parallelism into account
+    KOTLIN_DEFAULT({ parallelism -> Dispatchers.KotlinDefault.limitedParallelism(parallelism) }),
+    GO_BASED({ parallelism -> Dispatchers.Default.limitedParallelism(parallelism) }) // TODO doesn't take parallelism into account
 }
 
 private const val WORK_INSIDE = 80

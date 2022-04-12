@@ -56,6 +56,7 @@ open class ChannelSinkBenchmark: ParametrizedDispatcherBase() {
 
     // Migrated from deprecated operators, are good only for stressing channels
 
+    @OptIn(InternalCoroutinesApi::class)
     private fun <E> ReceiveChannel<E>.filter(context: CoroutineContext = Dispatchers.Unconfined, predicate: suspend (E) -> Boolean): ReceiveChannel<E> =
         GlobalScope.produce(context, onCompletion = { cancel() }) {
             for (e in this@filter) {

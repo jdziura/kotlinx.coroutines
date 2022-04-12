@@ -129,25 +129,17 @@ open class ChannelProducerConsumerBenchmark {
 
 enum class DispatcherCreator(val create: (parallelism: Int) -> CoroutineDispatcher) {
     FORK_JOIN({ parallelism -> ForkJoinPool(parallelism).asCoroutineDispatcher() }),
-    KOTLIN_DEFAULT({ parallelism ->
-        kotlinx.coroutines.scheduling.KotlinDefaultCoroutineDispatcher(
-            corePoolSize = parallelism,
-            maxPoolSize = parallelism
-        )
-    }),
-    GO_BASED({ parallelism ->
-        kotlinx.coroutines.scheduling.ExperimentalCoroutineDispatcher(
-            corePoolSize = parallelism,
-            maxPoolSize = parallelism
-        )
-    })
+    KOTLIN_DEFAULT({ parallelism -> Dispatchers.KotlinDefault.limitedParallelism(parallelism) }),
+    GO_BASED({ parallelism -> Dispatchers.Default.limitedParallelism(parallelism) })
 }
 
 enum class ChannelCreator(private val capacity: Int) {
     RENDEZVOUS(Channel.RENDEZVOUS),
-//    BUFFERED_1(1),
+
+    //    BUFFERED_1(1),
     BUFFERED_2(2),
-//    BUFFERED_4(4),
+
+    //    BUFFERED_4(4),
     BUFFERED_32(32),
     BUFFERED_128(128),
     BUFFERED_UNLIMITED(Channel.UNLIMITED);
