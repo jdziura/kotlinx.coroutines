@@ -20,6 +20,7 @@ class ForkJoinTest : SchedulerTestBase() {
     }
 
     @Test
+    @Ignore
     fun asyncGoBased() {
         val coefficients = LongArray(TASK_SIZE) { ThreadLocalRandom.current().nextLong(0, 1024 * 1024) }
         println("kek")
