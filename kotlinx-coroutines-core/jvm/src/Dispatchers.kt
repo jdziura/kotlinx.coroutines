@@ -68,6 +68,9 @@ public actual object Dispatchers {
     @JvmStatic
     public val IO: CoroutineDispatcher = DefaultIoScheduler
 
+    @JvmStatic
+    public val KotlinDefault: CoroutineDispatcher = KotlinDefaultScheduler
+
     /**
      * Shuts down built-in dispatchers, such as [Default] and [IO],
      * stopping all the threads associated with them and making them reject all new tasks.

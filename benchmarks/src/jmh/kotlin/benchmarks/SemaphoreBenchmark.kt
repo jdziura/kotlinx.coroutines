@@ -19,8 +19,9 @@ import java.util.concurrent.*
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
 open class SemaphoreBenchmark {
-    @Param
-    private var _1_dispatcher: SemaphoreBenchDispatcherCreator = SemaphoreBenchDispatcherCreator.DEFAULT
+
+    @Param("FORK_JOIN", "KOTLIN_DEFAULT", "GO_BASED")
+    private var _1_dispatcher: SemaphoreBenchDispatcherCreator = SemaphoreBenchDispatcherCreator.FORK_JOIN
 
     @Param("0", "1000")
     private var _2_coroutines: Int = 0
@@ -28,8 +29,10 @@ open class SemaphoreBenchmark {
     @Param("1", "2", "4", "8", "32", "128", "100000")
     private var _3_maxPermits: Int = 0
 
-    @Param("1", "2", "4", "8", "16") // local machine
-//    @Param("1", "2", "4", "8", "16", "32", "64", "128") // Server
+    @Param("1", "2", "4") // local machine
+//    @Param("1", "2", "4", "8", "16", "32", "64", "128", "144") // dasquad
+//    @Param("1", "2", "4", "8", "16", "32", "64", "96") // Google Cloud
+//    @Param("1", "2", "4", "8", "16", "32", "64", "128") // dasquad
     private var _4_parallelism: Int = 0
 
     private lateinit var dispatcher: CoroutineDispatcher
@@ -80,9 +83,9 @@ open class SemaphoreBenchmark {
 }
 
 enum class SemaphoreBenchDispatcherCreator(val create: (parallelism: Int) -> CoroutineDispatcher) {
-    //    FORK_JOIN({ parallelism -> ForkJoinPool(parallelism).asCoroutineDispatcher() }),
-    @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
-    DEFAULT({ parallelism -> ExperimentalCoroutineDispatcher(corePoolSize = parallelism, maxPoolSize = parallelism) })
+    FORK_JOIN({ parallelism -> ForkJoinPool(parallelism).asCoroutineDispatcher() }),
+    KOTLIN_DEFAULT({ parallelism -> Dispatchers.KotlinDefault.limitedParallelism(parallelism) }),
+    GO_BASED({ parallelism -> Dispatchers.Default.limitedParallelism(parallelism) }) // TODO doesn't take parallelism into account
 }
 
 private const val WORK_INSIDE = 50

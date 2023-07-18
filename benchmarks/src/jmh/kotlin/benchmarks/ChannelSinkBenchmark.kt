@@ -16,7 +16,10 @@ import kotlin.coroutines.*
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
 @Fork(1)
-open class ChannelSinkBenchmark {
+open class ChannelSinkBenchmark: ParametrizedDispatcherBase() {
+    @Param("kotlin_scheduler", "fjp", "scheduler")
+    override var dispatcher: String = "fjp"
+
     private val tl = ThreadLocal.withInitial({ 42 })
     private val tl2 = ThreadLocal.withInitial({ 239 })
 
@@ -53,6 +56,7 @@ open class ChannelSinkBenchmark {
 
     // Migrated from deprecated operators, are good only for stressing channels
 
+    @OptIn(InternalCoroutinesApi::class)
     private fun <E> ReceiveChannel<E>.filter(context: CoroutineContext = Dispatchers.Unconfined, predicate: suspend (E) -> Boolean): ReceiveChannel<E> =
         GlobalScope.produce(context, onCompletion = { cancel() }) {
             for (e in this@filter) {

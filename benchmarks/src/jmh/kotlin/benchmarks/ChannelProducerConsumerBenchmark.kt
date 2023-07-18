@@ -31,8 +31,8 @@ import java.util.concurrent.TimeUnit
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
 open class ChannelProducerConsumerBenchmark {
-    @Param
-    private var _0_dispatcher: DispatcherCreator = DispatcherCreator.DEFAULT
+    @Param("FORK_JOIN", "KOTLIN_DEFAULT", "GO_BASED")
+    private var _0_dispatcher: DispatcherCreator = DispatcherCreator.FORK_JOIN
 
     @Param
     private var _1_channel: ChannelCreator = ChannelCreator.RENDEZVOUS
@@ -43,8 +43,10 @@ open class ChannelProducerConsumerBenchmark {
     @Param("false", "true")
     private var _3_withSelect: Boolean = false
 
-    @Param("1", "2", "4", "8", "16") // local machine
-//    @Param("1", "2", "4", "8", "16", "32", "64", "128") // Server
+    @Param("1", "2", "4") // local machine
+//    @Param("1", "2", "4", "8", "12") // local machine
+//    @Param("1", "2", "4", "8", "16", "32", "64", "128") // dasquad
+//    @Param("1", "2", "4", "8", "16", "32", "64", "96") // Google Cloud
     private var _4_parallelism: Int = 0
 
     @Param("50")
@@ -136,15 +138,20 @@ open class ChannelProducerConsumerBenchmark {
 }
 
 enum class DispatcherCreator(val create: (parallelism: Int) -> CoroutineDispatcher) {
-    //FORK_JOIN({ parallelism ->  ForkJoinPool(parallelism).asCoroutineDispatcher() }),
-    @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
-    DEFAULT({ parallelism -> ExperimentalCoroutineDispatcher(corePoolSize = parallelism, maxPoolSize = parallelism) })
+    FORK_JOIN({ parallelism -> ForkJoinPool(parallelism).asCoroutineDispatcher() }),
+    KOTLIN_DEFAULT({ parallelism -> Dispatchers.KotlinDefault.limitedParallelism(parallelism) }),
+    GO_BASED({ parallelism -> Dispatchers.Default.limitedParallelism(parallelism) })
 }
 
 enum class ChannelCreator(private val capacity: Int) {
     RENDEZVOUS(Channel.RENDEZVOUS),
-    BUFFERED_16(16),
-    BUFFERED_64(64),
+
+    //    BUFFERED_1(1),
+    BUFFERED_2(2),
+
+    //    BUFFERED_4(4),
+    BUFFERED_32(32),
+    BUFFERED_128(128),
     BUFFERED_UNLIMITED(Channel.UNLIMITED);
 
     fun create(): Channel<Int> = Channel(capacity)

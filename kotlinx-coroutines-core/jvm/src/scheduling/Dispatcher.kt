@@ -4,6 +4,7 @@
 
 package kotlinx.coroutines.scheduling
 
+import kotlinx.atomicfu.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.internal.*
 import java.util.concurrent.*
@@ -94,10 +95,10 @@ internal object DefaultIoScheduler : ExecutorCoroutineDispatcher(), Executor {
 
 // Instantiated in tests so we can test it in isolation
 internal open class SchedulerCoroutineDispatcher(
-    private val corePoolSize: Int = CORE_POOL_SIZE,
-    private val maxPoolSize: Int = MAX_POOL_SIZE,
-    private val idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
-    private val schedulerName: String = "CoroutineScheduler",
+    internal val corePoolSize: Int = CORE_POOL_SIZE,
+    internal val maxPoolSize: Int = MAX_POOL_SIZE,
+    internal val idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
+    internal val schedulerName: String = "CoroutineScheduler",
 ) : ExecutorCoroutineDispatcher() {
 
     override val executor: Executor
@@ -106,8 +107,10 @@ internal open class SchedulerCoroutineDispatcher(
     // This is variable for test purposes, so that we can reinitialize from clean state
     private var coroutineScheduler = createScheduler()
 
-    private fun createScheduler() =
-        CoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName)
+//        private fun createScheduler() = CoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName)
+    internal open fun createScheduler(): Scheduler {
+        return GoBasedCoroutineScheduler(corePoolSize, maxPoolSize, schedulerName)
+    }
 
     override fun dispatch(context: CoroutineContext, block: Runnable): Unit = coroutineScheduler.dispatch(block)
 
@@ -137,4 +140,21 @@ internal open class SchedulerCoroutineDispatcher(
 
     // for tests only
     internal fun restore() = usePrivateScheduler() // recreate scheduler
+}
+
+internal object KotlinDefaultScheduler : KotlinDefaultCoroutineDispatcher() {
+    override fun close() {
+        throw UnsupportedOperationException("KotlinDefaultScheduler cannot be closed")
+    }
+
+    override fun toString(): String = "KotlinDefaultScheduler"
+}
+
+internal open class KotlinDefaultCoroutineDispatcher(
+    corePoolSize: Int = CORE_POOL_SIZE,
+    maxPoolSize: Int = MAX_POOL_SIZE,
+    idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
+    schedulerName: String = "CoroutineScheduler",
+) : SchedulerCoroutineDispatcher(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName) {
+    override fun createScheduler() = CoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName)
 }
