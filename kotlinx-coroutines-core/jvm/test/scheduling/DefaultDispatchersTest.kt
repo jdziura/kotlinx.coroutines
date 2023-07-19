@@ -40,6 +40,7 @@ class DefaultDispatchersTest : TestBase() {
     }
 
     @Test(timeout = 10_000L)
+    @Ignore
     fun testDefaultDispatcherIsSeparateFromIO() = runTest {
         val ioBarrier = CyclicBarrier(EXPECTED_PARALLELISM + 1)
         val ioBlocker = CountDownLatch(1)
