@@ -23,7 +23,7 @@ class CoroutineDispatcherTest : SchedulerTestBase() {
         corePoolSize = 1
         expect(1)
         withContext(dispatcher) {
-            require(Thread.currentThread() is GoBasedCoroutineScheduler.Worker)
+            require(Thread.currentThread() is CsBasedCoroutineScheduler.Worker)
             expect(2)
             val job = async {
                 expect(3)
@@ -134,7 +134,7 @@ class CoroutineDispatcherTest : SchedulerTestBase() {
     @Test
     fun testThreadName() = runBlocking {
         val initialCount = Thread.getAllStackTraces().keys.asSequence()
-            .count { it is GoBasedCoroutineScheduler.Worker && it.name.contains("SomeTestName") }
+            .count { it is CsBasedCoroutineScheduler.Worker && it.name.contains("SomeTestName") }
         assertEquals(0, initialCount)
         val dispatcher = SchedulerCoroutineDispatcher(1, 1, IDLE_WORKER_KEEP_ALIVE_NS, "SomeTestName")
         dispatcher.use {
@@ -142,7 +142,7 @@ class CoroutineDispatcherTest : SchedulerTestBase() {
             }.join()
 
             val count = Thread.getAllStackTraces().keys.asSequence()
-                .count { it is GoBasedCoroutineScheduler.Worker && it.name.contains("SomeTestName") }
+                .count { it is CsBasedCoroutineScheduler.Worker && it.name.contains("SomeTestName") }
             assertEquals(1, count)
         }
     }
