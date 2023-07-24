@@ -72,16 +72,6 @@ internal class CsBasedCoroutineScheduler(
         private fun runWorker() {}
     }
 
-    internal inner class HillClimbing private constructor() {
-        init {
-
-        }
-
-        fun update(currentThreadCount: Int, sampleDurationSeconds: Double, numCompletions: Int): Int {
-            return currentThreadCount
-        }
-    }
-
     fun runSafely(task: Task) {
         try {
             task.run()
@@ -92,7 +82,7 @@ internal class CsBasedCoroutineScheduler(
             unTrackTask()
         }
     }
-
+    
     override fun execute(command: Runnable) = dispatch(command)
 
     override fun close() {
