@@ -14,11 +14,16 @@ import java.lang.Runnable
 import java.util.*
 import java.util.concurrent.*
 import java.util.concurrent.atomic.*
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.LockSupport.*
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.collections.ArrayDeque
 import kotlin.random.*
 import kotlin.random.Random
+
+internal const val NUM_PROCESSING_WORK_SHIFT = 0
+internal const val NUM_EXISTING_THREADS_SHIFT = 16
+internal const val NUM_THREADS_GOAL_SHIFT = 32
 
 internal class CsBasedCoroutineScheduler(
     @JvmField val nProcessors: Int,
@@ -37,8 +42,45 @@ internal class CsBasedCoroutineScheduler(
         }
     }
 
+    val workQueue = CsBasedWorkQueue(this)
+    val numRequestedWorkers = atomic(0)
+
+    internal class ThreadCounts(_data: Long) {
+        val data = atomic(_data)
+
+        // Not atomic
+        private fun setValue(value: Long, shift: Int) {
+            var newData = data.value
+            val allSet: Long = UShort.MAX_VALUE as Long
+            val clearBytes: Long = (allSet shl shift).inv()
+            newData = (newData and clearBytes) or (value shl shift)
+            data.value = newData
+        }
+
+        var numProcessingWork: Short
+            get() = (data.value shr NUM_PROCESSING_WORK_SHIFT) as Short
+            set(value) = setValue(value as Long, NUM_PROCESSING_WORK_SHIFT)
+
+        var numExistingThreads: Short
+            get() = (data.value shr NUM_EXISTING_THREADS_SHIFT) as Short
+            set(value) = setValue(value as Long, NUM_EXISTING_THREADS_SHIFT)
+
+        var numThreadsGoal: Short
+            get() = (data.value shr NUM_THREADS_GOAL_SHIFT) as Short
+            set(value) = setValue(value as Long, NUM_THREADS_GOAL_SHIFT)
+    }
+
+    val counts = ThreadCounts(0L)
+
+    fun requestWorker() {
+        numRequestedWorkers.incrementAndGet()
+
+    }
+
     override fun dispatch(block: Runnable, taskContext: TaskContext, tailDispatch: Boolean) {
         trackTask()
+        val task = createTask(block, taskContext)
+        workQueue.enqueue(task, true)
     }
 
     override fun createTask(block: Runnable, taskContext: TaskContext): Task {
@@ -51,36 +93,56 @@ internal class CsBasedCoroutineScheduler(
         return TaskImpl(block, nanoTime, taskContext)
     }
 
-    internal inner class Worker private constructor() : Thread() {
-        init {
-            isDaemon = true
+    internal object WorkerThread {
+        fun maybeAddWorkingWorker() {
+//            val oldCounts = counts.value
+//            while (true) {
+//                val numProcessingWork = getProcessingWork(oldCounts)
+//                if (numProcessingWork >= getThreadsGoal(oldCounts)) {
+//                    return
+//                }
+//
+//                val newNumProcessingWork = numProcessingWork + 1
+//                val numExistingThreads = getExistingThreads(oldCounts)
+//                val newNumExistingThreads = max(numExistingThreads, newNumProcessingWork)
+//
+//                val newCounts = oldCounts
+//
+//            }
         }
 
-        var indexInArray = 0
-            set(index) {
-                name = "$schedulerName-worker-$index"
-                field = index
-            }
+        fun workerStart() {
+            // TODO - implement
+//            val curCounts = counts.value
+//            while (true) {
+//                val numProcessingWork
+//            }
 
-        constructor(index: Int) : this() {
-            indexInArray = index
         }
-        inline val scheduler get() = this@CsBasedCoroutineScheduler
-
-        override fun run() = runWorker()
-
-        private fun runWorker() {}
+        fun createWorkerThread() {
+            // TODO - implement
+        }
     }
-
-    internal inner class HillClimbing private constructor() {
-        init {
-
-        }
-
-        fun update(currentThreadCount: Int, sampleDurationSeconds: Double, numCompletions: Int): Int {
-            return currentThreadCount
-        }
-    }
+//    internal inner class Worker private constructor() : Thread() {
+//        init {
+//            isDaemon = true
+//        }
+//
+//        var indexInArray = 0
+//            set(index) {
+//                name = "$schedulerName-worker-$index"
+//                field = index
+//            }
+//
+//        constructor(index: Int) : this() {
+//            indexInArray = index
+//        }
+//        inline val scheduler get() = this@CsBasedCoroutineScheduler
+//
+//        override fun run() = runWorker()
+//
+//        private fun runWorker() {}
+//    }
 
     fun runSafely(task: Task) {
         try {
