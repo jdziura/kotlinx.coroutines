@@ -200,24 +200,28 @@ internal class CsBasedWorkQueue(
     val scheduler: CsBasedCoroutineScheduler = _scheduler
 
     fun ensureThreadRequested() {
-        if (hasOutstandingThreadRequest.compareAndSet(1, 0)) {
+        System.err.println("ensureThreadRequested")
+        if (hasOutstandingThreadRequest.compareAndSet(0, 1)) {
             scheduler.requestWorker()
         }
     }
     fun enqueue(task: Task, forceGlobal: Boolean) {
-        val t1 = WorkQueueThreadLocals.threadLocals.get()
+        synchronized(this) {
+            System.err.println("enqueue")
+            val t1 = WorkQueueThreadLocals.threadLocals.get()
 
-        if (forceGlobal == false && t1 != null) {
-            t1.workStealingQueue.localPush(task)
-        } else {
-            val queue =
-                if (assignableWorkItemQueueCount > 0 && t1 != null)
-                    t1.assignedGlobalWorkItemQueue
-                else
-                    workItems
-            queue.add(task)
+            if (forceGlobal == false && t1 != null) {
+                t1.workStealingQueue.localPush(task)
+            } else {
+                val queue =
+                    if (assignableWorkItemQueueCount > 0 && t1 != null)
+                        t1.assignedGlobalWorkItemQueue
+                    else
+                        workItems
+                queue.add(task)
+            }
+
+            ensureThreadRequested()
         }
-
-        ensureThreadRequested()
     }
 }

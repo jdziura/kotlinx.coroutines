@@ -17,13 +17,47 @@ import java.util.concurrent.atomic.*
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.LockSupport.*
 import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.CyclicBarrier
 import kotlin.collections.ArrayDeque
 import kotlin.random.*
 import kotlin.random.Random
 
-internal const val NUM_PROCESSING_WORK_SHIFT = 0
-internal const val NUM_EXISTING_THREADS_SHIFT = 16
-internal const val NUM_THREADS_GOAL_SHIFT = 32
+// TODO - do some tests
+internal class AutoResetEvent(
+    private var open: Boolean
+) {
+    private val monitor = Object()
+    fun waitOne() {
+        synchronized(monitor) {
+            while (!open) {
+                monitor.wait()
+            }
+            open = false
+        }
+    }
+
+    fun waitOne(timeout: Long): Boolean {
+        synchronized(monitor) {
+            val timestamp = System.currentTimeMillis()
+            while (!open) {
+                monitor.wait(timeout)
+                if (System.currentTimeMillis() - timestamp >= timeout) {
+                    open = false
+                    return false
+                }
+            }
+            open = false
+            return true
+        }
+    }
+
+    fun set() {
+        synchronized(monitor) {
+            open = true
+            monitor.notify()
+        }
+    }
+}
 
 internal class CsBasedCoroutineScheduler(
     @JvmField val nProcessors: Int,
@@ -45,41 +79,16 @@ internal class CsBasedCoroutineScheduler(
     val workQueue = CsBasedWorkQueue(this)
     val numRequestedWorkers = atomic(0)
 
-    internal class ThreadCounts(_data: Long) {
-        val data = atomic(_data)
-
-        // Not atomic
-        private fun setValue(value: Long, shift: Int) {
-            var newData = data.value
-            val allSet: Long = UShort.MAX_VALUE as Long
-            val clearBytes: Long = (allSet shl shift).inv()
-            newData = (newData and clearBytes) or (value shl shift)
-            data.value = newData
-        }
-
-        var numProcessingWork: Short
-            get() = (data.value shr NUM_PROCESSING_WORK_SHIFT) as Short
-            set(value) = setValue(value as Long, NUM_PROCESSING_WORK_SHIFT)
-
-        var numExistingThreads: Short
-            get() = (data.value shr NUM_EXISTING_THREADS_SHIFT) as Short
-            set(value) = setValue(value as Long, NUM_EXISTING_THREADS_SHIFT)
-
-        var numThreadsGoal: Short
-            get() = (data.value shr NUM_THREADS_GOAL_SHIFT) as Short
-            set(value) = setValue(value as Long, NUM_THREADS_GOAL_SHIFT)
-    }
-
-    val counts = ThreadCounts(0L)
-
     fun requestWorker() {
         numRequestedWorkers.incrementAndGet()
-
+        maybeAddWorker()
+        ensureGateThread()
     }
 
     override fun dispatch(block: Runnable, taskContext: TaskContext, tailDispatch: Boolean) {
         trackTask()
         val task = createTask(block, taskContext)
+        System.err.println("dispatch")
         workQueue.enqueue(task, true)
     }
 
@@ -93,56 +102,160 @@ internal class CsBasedCoroutineScheduler(
         return TaskImpl(block, nanoTime, taskContext)
     }
 
-    internal object WorkerThread {
-        fun maybeAddWorkingWorker() {
-//            val oldCounts = counts.value
-//            while (true) {
-//                val numProcessingWork = getProcessingWork(oldCounts)
-//                if (numProcessingWork >= getThreadsGoal(oldCounts)) {
-//                    return
-//                }
-//
-//                val newNumProcessingWork = numProcessingWork + 1
-//                val numExistingThreads = getExistingThreads(oldCounts)
-//                val newNumExistingThreads = max(numExistingThreads, newNumProcessingWork)
-//
-//                val newCounts = oldCounts
-//
-//            }
-        }
-
-        fun workerStart() {
-            // TODO - implement
-//            val curCounts = counts.value
-//            while (true) {
-//                val numProcessingWork
-//            }
-
-        }
-        fun createWorkerThread() {
-            // TODO - implement
+    var workingThreads = 0
+    val maxWorkingThreads = 8
+    fun maybeAddWorker() {
+        // TODO - implement
+        synchronized(this) {
+            if (workingThreads < maxWorkingThreads) {
+                workingThreads++
+                createWorker()
+            }
         }
     }
-//    internal inner class Worker private constructor() : Thread() {
-//        init {
-//            isDaemon = true
+
+    fun createWorker() {
+        synchronized(this) {
+            val worker = Worker()
+            worker.start()
+        }
+    }
+
+    // TODO - const
+    val maxRuns = 2
+
+    // TODO - const
+    val gateThreadRunningMask = 0x4
+
+    val gateThreadRunningState = atomic(0)
+    val runGateThreadEvent = AutoResetEvent(true)
+    val delayEvent = AutoResetEvent(false)
+
+    fun getRunningStateForNumRuns(numRuns: Int): Int {
+        require(numRuns >= 0)
+        require(numRuns <= maxRuns)
+        return gateThreadRunningMask or numRuns
+    }
+
+    fun ensureGateThread() {
+        synchronized(this) {
+            if (gateThreadRunningState.value == getRunningStateForNumRuns(maxRuns)) {
+                return
+            }
+
+            val numRunsMask = gateThreadRunningState.getAndSet(getRunningStateForNumRuns(maxRuns))
+            if (numRunsMask == getRunningStateForNumRuns(0)) {
+                runGateThreadEvent.set()
+            } else if ((numRunsMask and gateThreadRunningMask) == 0) {
+                createGateThread()
+            }
+        }
+    }
+
+    fun createGateThread() {
+        // TODO - C# has dedicated stack size for that thread, investigate
+        val gateThread = GateThread()
+        gateThread.start()
+    }
+
+    var previousGateActivitiesTimeMs = 0L
+
+//    // TODO - check if thread safe
+//    var pendingBlockingAdjustment = PendingBlockingAdjustment.None
+//
+//    // TODO - pack in DelayHelper
+//    var previousBlockingAdjustmentDelayMs = 0
+//    var previousBlockingAdjustmentDelatStartTimeMs = 0L
+//    val hasBlockingAdjustmentDelay: Boolean
+//        get() = previousBlockingAdjustmentDelayMs != 0
+    fun getNextDelay(currentTimeMs: Long): Long {
+        // TODO - implement
+
+        // const delay for now, ugly val to compile without warnings
+        val retValue = 500L + currentTimeMs - currentTimeMs
+        return retValue
+    }
+//
+//    fun hasBlockingAdjustmentDelayElapsed(currentTimeMs: Long, wasSignaledToWake: Boolean): Boolean {
+//        require(hasBlockingAdjustmentDelay)
+//        if (!wasSignaledToWake && adjustForBlockingAfterNextDelay) {
+//            return true
 //        }
 //
-//        var indexInArray = 0
-//            set(index) {
-//                name = "$schedulerName-worker-$index"
-//                field = index
-//            }
+//        val elapsedMsSincePreviousBlockingAdjustmentDelay =
+//            currentTimeMs - previousBlockingAdjustmentDelayStartTimeMs
 //
-//        constructor(index: Int) : this() {
-//            indexInArray = index
-//        }
-//        inline val scheduler get() = this@CsBasedCoroutineScheduler
-//
-//        override fun run() = runWorker()
-//
-//        private fun runWorker() {}
+//        return elapsedMsSincePreviousBlockingAdjustmentDelay >= previousBlockingAdjustmentDelayMs
 //    }
+//
+//    enum class PendingBlockingAdjustment {
+//        None, Immediately, WithDelayIfNecessary
+//    }
+//
+//    fun performBlockingAdjustment(previousDelayElapsed: Boolean): Long {
+//
+//    }
+
+    internal inner class GateThread : Thread() {
+        init {
+            isDaemon = true
+        }
+
+        inline val scheduler get() = this@CsBasedCoroutineScheduler
+
+        override fun run() = runGateThread()
+
+        private fun runGateThread() {
+            // TODO - initialization in C# GateThreadStart()
+            System.err.println("GateThread started")
+            while (true) {
+                runGateThreadEvent.waitOne()
+                var currentTimeMs = System.currentTimeMillis()
+                previousGateActivitiesTimeMs = currentTimeMs
+
+                while (true) {
+                    val wasSignaledToWake = delayEvent.waitOne(getNextDelay(currentTimeMs))
+                    currentTimeMs = System.currentTimeMillis()
+
+                    // TODO - understand what is going on and implement
+                    // for now: skip "blockingAdjustment" and everything with it
+//                    do {
+//                        if (pendingBlockingAdjustment == PendingBlockingAdjustment.None) {
+//                            previousBlockingAdjustmentDelayMs = 0
+//                            break
+//                        }
+//
+//                        var previousDelayElapsed = false
+//                        if (hasBlockingAdjustmentDelay) {
+//                            previousDelayElapsed =
+//                                hasBlockingAdjustmentDelayElapsed(currentTimeMs, wasSignaledToWake)
+//
+//                            if (pendingBlockingAdjustment == PendingBlockingAdjustment.WithDelayIfNecessary && !previousDelayElapsed) {
+//                                break
+//                            }
+//                        }
+//
+//                        val nextDelayMs = performBlockingAdjustment(previousDelayElapsed)
+//                    } while (false)
+                }
+            }
+        }
+    }
+
+    internal inner class Worker : Thread() {
+        init {
+            isDaemon = true
+        }
+
+        inline val scheduler get() = this@CsBasedCoroutineScheduler
+
+        override fun run() = runWorker()
+
+        private fun runWorker() {
+            // TODO - locking
+            System.err.println("Worker created!")
+        }
+    }
 
     fun runSafely(task: Task) {
         try {
