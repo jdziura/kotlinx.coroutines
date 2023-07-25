@@ -58,10 +58,9 @@ internal class HillClimbing {
         CooperativeBlocking
     }
     companion object {
-        private const val logCapacity = 200
         private const val wavePeriod = 4
         private const val maxThreadWaveMagnitude = 20
-        private const val threadMagnitudeMultiplier = 100
+        private const val threadMagnitudeMultiplier = 100.0 / 100.0
         private const val samplesToMeasure = wavePeriod * 8
         private const val targetThroughputRatio = 15.0 / 100.0
         private const val targetSignalToNoiseRatio = 300.0 / 100.0
@@ -80,8 +79,6 @@ internal class HillClimbing {
     private var currentSampleMs = Random.nextInt(sampleIntervalMsLow, sampleIntervalMsHigh + 1)
 
     private var lastThreadCount = 0
-    private var secondsElapsedSinceLastChange = 0.0
-    private var completionsSinceLastChange = 0.0
     private var accumulatedSampleDurationSeconds = 0.0
     private var accumulatedCompletionCount = 0
     private var totalSamples = 0L
@@ -93,16 +90,12 @@ internal class HillClimbing {
             forceChange(currentThreadCount, StateOrTransition.Initializing)
         }
 
-        secondsElapsedSinceLastChange += _sampleDurationSeconds
-        completionsSinceLastChange += _numCompletions
-
         val sampleDurationSeconds = _sampleDurationSeconds + accumulatedSampleDurationSeconds
         val numCompletions = _numCompletions + accumulatedCompletionCount
 
         if (totalSamples > 0 && ((currentThreadCount - 1.0) / numCompletions) >= maxSampleError) {
             accumulatedSampleDurationSeconds = sampleDurationSeconds
             accumulatedCompletionCount = numCompletions
-            System.err.println("Early: $totalSamples, $currentThreadCount, $numCompletions")
             return (currentThreadCount to 10)
         }
 
@@ -110,7 +103,6 @@ internal class HillClimbing {
         accumulatedCompletionCount = 0
 
         val throughput = numCompletions / sampleDurationSeconds
-//        System.err.println("Throughput measured: $throughput")
 
         val sampleIndex = (totalSamples % samplesToMeasure).toInt()
         samples[sampleIndex] = throughput
@@ -124,7 +116,7 @@ internal class HillClimbing {
         var confidence = 0.0
         var state = StateOrTransition.Warmup
 
-        var sampleCount = min(totalSamples - 1, samplesToMeasure.toLong()).toInt() / wavePeriod * wavePeriod
+        val sampleCount = (min(totalSamples - 1, samplesToMeasure.toLong()).toInt() / wavePeriod) * wavePeriod
 
         if (sampleCount > wavePeriod) {
             var sampleSum = 0.0
@@ -135,12 +127,12 @@ internal class HillClimbing {
                 threadSum += threadCounts[((totalSamples - sampleCount + i) % samplesToMeasure).toInt()]
             }
 
-            var averageThroughput = sampleSum / sampleCount
-            var averageThreadCount = threadSum / sampleCount
+            val averageThroughput = sampleSum / sampleCount
+            val averageThreadCount = threadSum / sampleCount
 
             if (averageThroughput > 0 && averageThreadCount > 0) {
-                var adjacentPeriod1 = sampleCount / ((sampleCount.toDouble() / wavePeriod) + 1)
-                var adjacentPeriod2 = sampleCount / ((sampleCount.toDouble() / wavePeriod) - 1)
+                val adjacentPeriod1 = sampleCount / ((sampleCount.toDouble() / wavePeriod) + 1)
+                val adjacentPeriod2 = sampleCount / ((sampleCount.toDouble() / wavePeriod) - 1)
 
                 throughputWaveComponent = getWaveComponent(samples, sampleCount, wavePeriod.toDouble()) / averageThroughput
                 throughputErrorEstimate = (getWaveComponent(samples, sampleCount, adjacentPeriod1) / averageThroughput).abs()
@@ -166,7 +158,7 @@ internal class HillClimbing {
                     state = StateOrTransition.Stabilizing
                 }
 
-                var noiseForConfidence = max(averageThroughputNoise, throughputErrorEstimate)
+                val noiseForConfidence = max(averageThroughputNoise, throughputErrorEstimate)
                 if (noiseForConfidence > 0.0) {
                     confidence = (threadWaveComponent.abs() / noiseForConfidence) / targetSignalToNoiseRatio
                 } else {
@@ -178,7 +170,7 @@ internal class HillClimbing {
         var move = min(1.0, max(-1.0, ratio.re))
         move *= min(1.0, max(0.0, confidence))
 
-        var gain = maxChangePerSecond * sampleDurationSeconds
+        val gain = maxChangePerSecond * sampleDurationSeconds
         move = abs(move).pow(gainExponent) * (if (move >= 0.0) 1.0 else -1.0) * gain
         move = min(move, maxChangePerSample.toDouble())
 
@@ -191,8 +183,8 @@ internal class HillClimbing {
         newThreadWaveMagnitude = max(newThreadWaveMagnitude, 1)
 
         // TODO - get max/min threads from scheduler
-        var maxThreads = 64
-        var minThreads = 1
+        val maxThreads = 64
+        val minThreads = 1
 
         currentControlSetting = min(currentControlSetting, (maxThreads - newThreadWaveMagnitude).toDouble())
         currentControlSetting = max(currentControlSetting, minThreads.toDouble())
@@ -202,13 +194,14 @@ internal class HillClimbing {
         newThreadCount = min(maxThreads, newThreadCount)
         newThreadCount = max(minThreads, newThreadCount)
 
-        // TODO - log here if needed
-        System.err.println("$currentControlSetting, $newThreadCount, $move, $gain")
+//        System.err.println(
+//                    "newThreadCount: $newThreadCount\n" +
+//                    "currentControlSetting: $currentControlSetting\n" +
+//                    "newThreadWaveMagnitude: $newThreadWaveMagnitude\n" +
+//                    "totalSamples: $totalSamples\n")
 
         if (newThreadCount != currentThreadCount) {
             changeThreadCount(newThreadCount, state)
-            secondsElapsedSinceLastChange = 0.0
-            completionsSinceLastChange = 0.0
         }
 
         var newSampleInterval: Int
@@ -240,9 +233,10 @@ internal class HillClimbing {
         require(period >= 2)
         require(numSamples <= samples.size)
 
-        var w = 2 * PI / period
-        var cosine = cos(w)
-        var coeff = 2 * cosine
+        val w = 2.0 * PI / period
+        val cosine = cos(w)
+        val sine = sin(w)
+        val coeff = 2.0 * cosine
         var q0: Double
         var q1 = 0.0
         var q2 = 0.0
@@ -252,6 +246,6 @@ internal class HillClimbing {
             q1 = q0
         }
 
-        return Complex(q1 - q2 * cosine, q2 * sin(w)) / numSamples.toDouble()
+        return Complex(q1 - q2 * cosine, q2 * sine) / numSamples.toDouble()
     }
 }
