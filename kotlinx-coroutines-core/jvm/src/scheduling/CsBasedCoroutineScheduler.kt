@@ -76,6 +76,8 @@ internal class CsBasedCoroutineScheduler(
         }
     }
 
+    val globalMonitor = Object()
+
     val workQueue = CsBasedWorkQueue(this)
     val numRequestedWorkers = atomic(0)
 
@@ -106,7 +108,7 @@ internal class CsBasedCoroutineScheduler(
     val maxWorkingThreads = 8
     fun maybeAddWorker() {
         // TODO - implement
-        synchronized(this) {
+        synchronized(globalMonitor) {
             if (workingThreads < maxWorkingThreads) {
                 workingThreads++
                 createWorker()
@@ -114,8 +116,105 @@ internal class CsBasedCoroutineScheduler(
         }
     }
 
+    // TODO implement all functionalities
+    private class ThreadCounts(private var data: Long) {
+        companion object {
+            private const val NumProcessingWorkShift = 0
+            private const val NumExistingThreadsShift = 16
+            private const val NumThreadsGoalShift = 32
+        }
+
+        private fun getShortValue(shift: Int): Short = ((data shr shift) and 0xFFFF).toShort()
+        private fun setShortValue(value: Short, shift: Int) {
+            data = (data and (0xFFFFL.inv() shl shift)) or ((value.toLong() and 0xFFFF) shl shift)
+        }
+
+        var numProcessingWork: Short
+            get() {
+                val value = getShortValue(NumProcessingWorkShift)
+                assert(value >= 0)
+                return value
+            }
+            set(value) {
+                assert(value >= 0)
+                setShortValue(value.coerceAtLeast(0), NumProcessingWorkShift)
+            }
+
+        var numExistingThreads: Short
+            get() {
+                val value = getShortValue(NumExistingThreadsShift)
+                assert(value >= 0)
+                return value
+            }
+            set(value) {
+                assert(value >= 0)
+                setShortValue(value.coerceAtLeast(0), NumExistingThreadsShift)
+            }
+
+        var numThreadsGoal: Short
+            get() {
+                val value = getShortValue(NumThreadsGoalShift)
+                assert(value > 0)
+                return value
+            }
+            set(value) {
+                assert(value > 0)
+                setShortValue(value.coerceAtLeast(1), NumThreadsGoalShift)
+            }
+
+//        fun interlockedSetNumThreadsGoal(value: Short): ThreadCounts {
+//            ThreadPoolInstance._threadAdjustmentLock.verifyIsLocked()
+//
+//            var counts = this
+//            while (true) {
+//                val newCounts = counts.copy().apply { NumThreadsGoal = value }
+//
+//                val countsBeforeUpdate = interlockedCompareExchange(newCounts, counts)
+//                if (countsBeforeUpdate == counts) {
+//                    return newCounts
+//                }
+//
+//                counts = countsBeforeUpdate
+//            }
+//        }
+
+        fun volatileRead(): ThreadCounts {
+            synchronized(this) {
+                return ThreadCounts(data)
+            }
+        }
+
+        // Important - reversed parameters to reduce confusion with other kotlin CAS
+//        fun compareAndSet(oldCounts: ThreadCounts, newCounts: ThreadCounts): ThreadCounts {
+//            if (newCounts.NumThreadsGoal != oldCounts.NumThreadsGoal) {
+//                ThreadPoolInstance._threadAdjustmentLock.verifyIsLocked()
+//            }
+//
+//            val result = ThreadCounts(
+//                Interlocked.compareExchange(
+//                    ThreadPoolInstance::data,
+//                    newCounts.data,
+//                    oldCounts.data
+//                )
+//            )
+//            return result
+//        }
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is ThreadCounts) return false
+            return data == other.data
+        }
+
+        override fun hashCode(): Int {
+            return data.hashCode()
+        }
+    }
+
+    val counts = ThreadCounts(0)
+
     fun createWorker() {
-        synchronized(this) {
+        synchronized(globalMonitor) {
             val worker = Worker()
             worker.start()
         }
@@ -138,7 +237,7 @@ internal class CsBasedCoroutineScheduler(
     }
 
     fun ensureGateThread() {
-        synchronized(this) {
+        synchronized(globalMonitor) {
             if (gateThreadRunningState.value == getRunningStateForNumRuns(maxRuns)) {
                 return
             }
@@ -210,15 +309,17 @@ internal class CsBasedCoroutineScheduler(
             System.err.println("GateThread started")
             while (true) {
                 runGateThreadEvent.waitOne()
-                var currentTimeMs = System.currentTimeMillis()
-                previousGateActivitiesTimeMs = currentTimeMs
+                // TODO - understand what it is supposed to do
+                // implement or ignore
+                System.err.println("GateThread doin something")
 
-                while (true) {
-                    val wasSignaledToWake = delayEvent.waitOne(getNextDelay(currentTimeMs))
-                    currentTimeMs = System.currentTimeMillis()
-
-                    // TODO - understand what is going on and implement
-                    // for now: skip "blockingAdjustment" and everything with it
+//                var currentTimeMs = System.currentTimeMillis()
+//                previousGateActivitiesTimeMs = currentTimeMs
+//
+//                while (true) {
+//                    val wasSignaledToWake = delayEvent.waitOne(getNextDelay(currentTimeMs))
+//                    currentTimeMs = System.currentTimeMillis()
+//
 //                    do {
 //                        if (pendingBlockingAdjustment == PendingBlockingAdjustment.None) {
 //                            previousBlockingAdjustmentDelayMs = 0
@@ -237,7 +338,7 @@ internal class CsBasedCoroutineScheduler(
 //
 //                        val nextDelayMs = performBlockingAdjustment(previousDelayElapsed)
 //                    } while (false)
-                }
+//                }
             }
         }
     }
@@ -254,7 +355,23 @@ internal class CsBasedCoroutineScheduler(
         private fun runWorker() {
             // TODO - locking
             System.err.println("Worker created!")
+            while (true) {
+                workerDoWork()
+                // TODO - if (shouldExitWorker) break
+            }
         }
+
+        private fun workerDoWork() {
+            var alreadyRemovedWorkingWorker = false
+            while (takeActiveRequest()) {
+                // TODO - set lastDequeueTime
+
+            }
+        }
+    }
+
+    fun takeActiveRequest(): Boolean {
+
     }
 
     fun runSafely(task: Task) {
