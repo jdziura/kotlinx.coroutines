@@ -109,7 +109,7 @@ internal open class SchedulerCoroutineDispatcher(
 
 //        private fun createScheduler() = CoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName)
     internal open fun createScheduler(): Scheduler {
-        return CsBasedCoroutineScheduler(corePoolSize, maxPoolSize, schedulerName)
+        return CsBasedCoroutineScheduler(schedulerName)
     }
 
     override fun dispatch(context: CoroutineContext, block: Runnable): Unit = coroutineScheduler.dispatch(block)
