@@ -5,33 +5,25 @@
 package kotlinx.coroutines.scheduling
 
 import kotlinx.coroutines.*
+import kotlin.random.*
 import java.util.concurrent.atomic.*
 import java.util.concurrent.locks.*
 import java.util.concurrent.*
 import kotlinx.atomicfu.*
 
-// SA - AllThreadQueues
-// Q - WorkStealingQueue
-internal const val SA_INITIAL_SIZE = 16
 internal const val Q_INITIAL_SIZE = 32
-internal const val Q_START_INDEX = 0
 
-internal class WorkQueueThreadLocals(
-    val wq: CsBasedWorkQueue
-) {
+internal class WorkQueueThreadLocals(private val wq: CsBasedWorkQueue) {
     companion object {
         @JvmStatic
         val threadLocals = ThreadLocal<WorkQueueThreadLocals?>()
     }
 
-//    var isProcessingHighPriorityWorkItems: Boolean = false
-    var queueIndex: Int = 0
     val assignedGlobalWorkItemQueue = wq.workItems
     val workQueue = wq
     val workStealingQueue = CsBasedWorkQueue.WorkStealingQueue()
-//    val currentThread = Thread.currentThread()
-//    val threadLocalCompletionCountObject = CsBasedCoroutineScheduler.getOrCreateThreadLocalCompletionCountObject()
-//    val random = Random.XoshiroImpl()
+    val random = Random.asJavaRandom()
+    val currentThread = Thread.currentThread()
 
     init {
         CsBasedWorkQueue.WorkStealingQueueList.add(workStealingQueue)
@@ -54,15 +46,13 @@ internal class WorkQueueThreadLocals(
         CsBasedWorkQueue.WorkStealingQueueList.remove(workStealingQueue)
     }
 }
-internal class CsBasedWorkQueue(
-    val _scheduler: CsBasedCoroutineScheduler
-) {
+
+internal class CsBasedWorkQueue(private val scheduler: CsBasedCoroutineScheduler) {
     internal object WorkStealingQueueList {
-        private var queues = emptyArray<WorkStealingQueue?>()
+        var queues = emptyArray<WorkStealingQueue?>()
 
         fun add(q: WorkStealingQueue) {
             synchronized(this) {
-//                require(queues != null)
                 require(queues.indexOf(q) < 0)
 
                 val newQueues = queues.copyOf(queues.size + 1)
@@ -73,7 +63,6 @@ internal class CsBasedWorkQueue(
 
         fun remove(q: WorkStealingQueue) {
             synchronized(this) {
-//                require(queues != null)
                 if (queues.size == 0) {
                     return
                 }
@@ -97,8 +86,11 @@ internal class CsBasedWorkQueue(
     internal class WorkStealingQueue {
         private var array = arrayOfNulls<Task?>(Q_INITIAL_SIZE)
         private var mask = Q_INITIAL_SIZE - 1
-        private var headIndex = Q_START_INDEX
-        private var tailIndex = Q_START_INDEX
+        private var headIndex = 0
+        private var tailIndex = 0
+
+        var canSteal: Boolean = false
+            get() = headIndex < tailIndex
 
         fun localPush(task: Task) {
             synchronized(this) {
@@ -186,25 +178,65 @@ internal class CsBasedWorkQueue(
                 }
             }
         }
+
+        fun trySteal(): Task? {
+            synchronized(this) {
+                if (!canSteal) {
+                    return null
+                }
+
+                while (true) {
+                    val head = headIndex
+                    headIndex++
+
+                    if (head < tailIndex) {
+                        val idx = head and mask
+                        val task = array[idx]
+
+                        if (task == null) {
+                            continue
+                        }
+
+                        array[idx] = null
+                        return task
+                    }
+                    else {
+                        // should be never reached
+                        require(false)
+                        headIndex = head
+                    }
+                }
+            }
+        }
     }
 
     val workItems = ConcurrentLinkedQueue<Task>()
     val processors = Runtime.getRuntime().availableProcessors()
-    val processorsPerAssignableWorkItemQueue = 16
-    val assignableWorkItemQueueCount: Int
-        get() = if (processors <= 32) 0
-                else (processors + processorsPerAssignableWorkItemQueue - 1) / processorsPerAssignableWorkItemQueue
+    var dispatchNormalPriorityWorkFirst = true
+    var hasOutstandingThreadRequest = 0
+    var threadLocalCompletionCountObject = 0
 
-    var hasOutstandingThreadRequest = atomic(0)
+    // TODO - implement or ignore
+//    val processorsPerAssignableWorkItemQueue = 16
+//    val assignableWorkItemQueueCount: Int
+//        get() = if (processors <= 32) 0
+//        else (processors + processorsPerAssignableWorkItemQueue - 1) / processorsPerAssignableWorkItemQueue
 
-    val scheduler: CsBasedCoroutineScheduler = _scheduler
 
     fun ensureThreadRequested() {
-        System.err.println("ensureThreadRequested")
-        if (hasOutstandingThreadRequest.compareAndSet(0, 1)) {
-            scheduler.requestWorker()
+//        System.err.println("ensureThreadRequested")
+//        if (hasOutstandingThreadRequest.compareAndSet(0, 1)) {
+//            scheduler.requestWorker()
+//        }
+        synchronized(this) {
+            System.err.println("ensureThreadRequested")
+            if (hasOutstandingThreadRequest == 0) {
+                hasOutstandingThreadRequest = 1
+                scheduler.requestWorker()
+            }
         }
     }
+
     fun enqueue(task: Task, forceGlobal: Boolean) {
         synchronized(this) {
             System.err.println("enqueue")
@@ -213,15 +245,93 @@ internal class CsBasedWorkQueue(
             if (forceGlobal == false && t1 != null) {
                 t1.workStealingQueue.localPush(task)
             } else {
-                val queue =
-                    if (assignableWorkItemQueueCount > 0 && t1 != null)
-                        t1.assignedGlobalWorkItemQueue
-                    else
-                        workItems
-                queue.add(task)
+                workItems.add(task)
             }
 
             ensureThreadRequested()
+        }
+    }
+
+    fun dequeue(t1: WorkQueueThreadLocals): Task? {
+        synchronized(this) {
+            var workItem: Task? = t1.workStealingQueue.localPop()
+            if (workItem != null) {
+                return workItem
+            }
+
+            workItem = workItems.poll()
+            if (workItem != null) {
+                return workItem
+            }
+
+            val localWsq = t1.workStealingQueue
+            val queues = WorkStealingQueueList.queues
+            var c = queues.size
+            require(c > 0)
+            val maxIndex = c - 1
+            var i = t1.random.nextInt(c)
+            while (c > 0) {
+                val otherQueue = queues[i]!!
+                if (otherQueue != localWsq && otherQueue.canSteal) {
+                    workItem = otherQueue.trySteal()
+
+                    if (workItem != null) {
+                        return workItem
+                    }
+                }
+
+                i = if (i < maxIndex) i + 1 else 0
+                c--
+            }
+
+            return null
+        }
+    }
+
+    fun createThreadLocals(): WorkQueueThreadLocals {
+        require(WorkQueueThreadLocals.threadLocals.get() == null)
+        WorkQueueThreadLocals.threadLocals.set(WorkQueueThreadLocals(this))
+        return WorkQueueThreadLocals.threadLocals.get()!!
+    }
+
+    fun getOrCreateThreadLocals(): WorkQueueThreadLocals {
+        return WorkQueueThreadLocals.threadLocals.get() ?: createThreadLocals()
+    }
+
+    fun markThreadRequestSatisifed() {
+        synchronized(this) {
+            hasOutstandingThreadRequest = 0
+        }
+    }
+
+    fun dispatch(): Boolean {
+        synchronized(this) {
+            val t1 = getOrCreateThreadLocals()
+            markThreadRequestSatisifed()
+
+            var workItem: Task? = null
+            do {
+                // TODO - check
+                if (dispatchNormalPriorityWorkFirst && !t1.workStealingQueue.canSteal) {
+//                    dispatchNormalPriorityWorkFirst = !dispatchNormalPriorityWorkFirst
+                    workItem = workItems.poll()
+                }
+
+                if (workItem == null) {
+                    workItem = dequeue(t1)
+                    if (workItem == null) {
+                        // TODO - maybe needed
+//                        ensureThreadRequested()
+                        return true
+                    }
+                }
+
+                ensureThreadRequested()
+            } while (false)
+
+            val currentThread = t1.currentThread
+            require(currentThread == Thread.currentThread())
+            return false
         }
     }
 }

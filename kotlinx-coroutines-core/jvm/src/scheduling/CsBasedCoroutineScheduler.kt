@@ -23,9 +23,7 @@ import kotlin.random.*
 import kotlin.random.Random
 
 // TODO - do some tests
-internal class AutoResetEvent(
-    private var open: Boolean
-) {
+internal class AutoResetEvent(private var open: Boolean) {
     private val monitor = Object()
     fun waitOne() {
         synchronized(monitor) {
@@ -59,6 +57,8 @@ internal class AutoResetEvent(
     }
 }
 
+internal val globalMonitor = Object()
+
 internal class CsBasedCoroutineScheduler(
     @JvmField val nProcessors: Int,
     @JvmField val maxWorkers: Int,
@@ -76,48 +76,8 @@ internal class CsBasedCoroutineScheduler(
         }
     }
 
-    val globalMonitor = Object()
-
-    val workQueue = CsBasedWorkQueue(this)
-    val numRequestedWorkers = atomic(0)
-
-    fun requestWorker() {
-        numRequestedWorkers.incrementAndGet()
-        maybeAddWorker()
-        ensureGateThread()
-    }
-
-    override fun dispatch(block: Runnable, taskContext: TaskContext, tailDispatch: Boolean) {
-        trackTask()
-        val task = createTask(block, taskContext)
-        System.err.println("dispatch")
-        workQueue.enqueue(task, true)
-    }
-
-    override fun createTask(block: Runnable, taskContext: TaskContext): Task {
-        val nanoTime = schedulerTimeSource.nanoTime()
-        if (block is Task) {
-            block.submissionTime = nanoTime
-            block.taskContext = taskContext
-            return block
-        }
-        return TaskImpl(block, nanoTime, taskContext)
-    }
-
-    var workingThreads = 0
-    val maxWorkingThreads = 8
-    fun maybeAddWorker() {
-        // TODO - implement
-        synchronized(globalMonitor) {
-            if (workingThreads < maxWorkingThreads) {
-                workingThreads++
-                createWorker()
-            }
-        }
-    }
-
     // TODO implement all functionalities
-    private class ThreadCounts(private var data: Long) {
+    private class ThreadCounts(var data: Long) {
         companion object {
             private const val NumProcessingWorkShift = 0
             private const val NumExistingThreadsShift = 16
@@ -179,26 +139,20 @@ internal class CsBasedCoroutineScheduler(
 //        }
 
         fun volatileRead(): ThreadCounts {
-            synchronized(this) {
+            synchronized(globalMonitor) {
                 return ThreadCounts(data)
             }
         }
 
-        // Important - reversed parameters to reduce confusion with other kotlin CAS
-//        fun compareAndSet(oldCounts: ThreadCounts, newCounts: ThreadCounts): ThreadCounts {
-//            if (newCounts.NumThreadsGoal != oldCounts.NumThreadsGoal) {
-//                ThreadPoolInstance._threadAdjustmentLock.verifyIsLocked()
-//            }
-//
-//            val result = ThreadCounts(
-//                Interlocked.compareExchange(
-//                    ThreadPoolInstance::data,
-//                    newCounts.data,
-//                    oldCounts.data
-//                )
-//            )
-//            return result
-//        }
+        fun compareAndSet(oldCounts: ThreadCounts, newCounts: ThreadCounts): Boolean {
+            synchronized(globalMonitor) {
+                if (oldCounts.data == data) {
+                    data = newCounts.data
+                    return true
+                }
+                return false
+            }
+        }
 
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -210,90 +164,6 @@ internal class CsBasedCoroutineScheduler(
             return data.hashCode()
         }
     }
-
-    val counts = ThreadCounts(0)
-
-    fun createWorker() {
-        synchronized(globalMonitor) {
-            val worker = Worker()
-            worker.start()
-        }
-    }
-
-    // TODO - const
-    val maxRuns = 2
-
-    // TODO - const
-    val gateThreadRunningMask = 0x4
-
-    val gateThreadRunningState = atomic(0)
-    val runGateThreadEvent = AutoResetEvent(true)
-    val delayEvent = AutoResetEvent(false)
-
-    fun getRunningStateForNumRuns(numRuns: Int): Int {
-        require(numRuns >= 0)
-        require(numRuns <= maxRuns)
-        return gateThreadRunningMask or numRuns
-    }
-
-    fun ensureGateThread() {
-        synchronized(globalMonitor) {
-            if (gateThreadRunningState.value == getRunningStateForNumRuns(maxRuns)) {
-                return
-            }
-
-            val numRunsMask = gateThreadRunningState.getAndSet(getRunningStateForNumRuns(maxRuns))
-            if (numRunsMask == getRunningStateForNumRuns(0)) {
-                runGateThreadEvent.set()
-            } else if ((numRunsMask and gateThreadRunningMask) == 0) {
-                createGateThread()
-            }
-        }
-    }
-
-    fun createGateThread() {
-        // TODO - C# has dedicated stack size for that thread, investigate
-        val gateThread = GateThread()
-        gateThread.start()
-    }
-
-    var previousGateActivitiesTimeMs = 0L
-
-//    // TODO - check if thread safe
-//    var pendingBlockingAdjustment = PendingBlockingAdjustment.None
-//
-//    // TODO - pack in DelayHelper
-//    var previousBlockingAdjustmentDelayMs = 0
-//    var previousBlockingAdjustmentDelatStartTimeMs = 0L
-//    val hasBlockingAdjustmentDelay: Boolean
-//        get() = previousBlockingAdjustmentDelayMs != 0
-    fun getNextDelay(currentTimeMs: Long): Long {
-        // TODO - implement
-
-        // const delay for now, ugly val to compile without warnings
-        val retValue = 500L + currentTimeMs - currentTimeMs
-        return retValue
-    }
-//
-//    fun hasBlockingAdjustmentDelayElapsed(currentTimeMs: Long, wasSignaledToWake: Boolean): Boolean {
-//        require(hasBlockingAdjustmentDelay)
-//        if (!wasSignaledToWake && adjustForBlockingAfterNextDelay) {
-//            return true
-//        }
-//
-//        val elapsedMsSincePreviousBlockingAdjustmentDelay =
-//            currentTimeMs - previousBlockingAdjustmentDelayStartTimeMs
-//
-//        return elapsedMsSincePreviousBlockingAdjustmentDelay >= previousBlockingAdjustmentDelayMs
-//    }
-//
-//    enum class PendingBlockingAdjustment {
-//        None, Immediately, WithDelayIfNecessary
-//    }
-//
-//    fun performBlockingAdjustment(previousDelayElapsed: Boolean): Long {
-//
-//    }
 
     internal inner class GateThread : Thread() {
         init {
@@ -361,28 +231,62 @@ internal class CsBasedCoroutineScheduler(
             }
         }
 
-        private fun workerDoWork() {
+        private fun workerDoWork(): Boolean {
             var alreadyRemovedWorkingWorker = false
             while (takeActiveRequest()) {
                 // TODO - set lastDequeueTime
+                if (!workQueue.dispatch()) {
+                    alreadyRemovedWorkingWorker = true
+                    break
+                }
 
+                if (numRequestedWorkers.value <= 0) {
+                    break
+                }
+
+                yield()
+
+                // TODO - if not single core, spinwait eps time
             }
+
+            if (!alreadyRemovedWorkingWorker) {
+                removeWorkingWorker()
+            }
+
+            return !alreadyRemovedWorkingWorker
         }
     }
 
-    fun takeActiveRequest(): Boolean {
+    private val workQueue = CsBasedWorkQueue(this)
+    private val numRequestedWorkers = atomic(0)
+    private val counts = ThreadCounts(0)
 
+    // TODO - const
+    private val maxRuns = 2
+    private val gateThreadRunningMask = 0x4
+
+    private val gateThreadRunningState = atomic(0)
+    private val runGateThreadEvent = AutoResetEvent(true)
+    private val delayEvent = AutoResetEvent(false)
+
+    private var workingThreads = 0
+    private val maxWorkingThreads = 8
+
+    override fun dispatch(block: Runnable, taskContext: TaskContext, tailDispatch: Boolean) {
+        trackTask()
+        val task = createTask(block, taskContext)
+        System.err.println("dispatch")
+        workQueue.enqueue(task, true)
     }
 
-    fun runSafely(task: Task) {
-        try {
-            task.run()
-        } catch (e: Throwable) {
-            val thread = Thread.currentThread()
-            thread.uncaughtExceptionHandler.uncaughtException(thread, e)
-        } finally {
-            unTrackTask()
+    override fun createTask(block: Runnable, taskContext: TaskContext): Task {
+        val nanoTime = schedulerTimeSource.nanoTime()
+        if (block is Task) {
+            block.submissionTime = nanoTime
+            block.taskContext = taskContext
+            return block
         }
+        return TaskImpl(block, nanoTime, taskContext)
     }
 
     override fun execute(command: Runnable) = dispatch(command)
@@ -394,4 +298,129 @@ internal class CsBasedCoroutineScheduler(
     override fun shutdown(timeout: Long) {
 
     }
+
+    // TODO - make queues inside this class and make this private
+    fun requestWorker() {
+        numRequestedWorkers.incrementAndGet()
+        maybeAddWorker()
+        ensureGateThread()
+    }
+
+    private fun maybeAddWorker() {
+        // TODO - implement
+        synchronized(globalMonitor) {
+            if (workingThreads < maxWorkingThreads) {
+                workingThreads++
+                createWorker()
+            }
+        }
+    }
+
+    private fun createWorker() {
+        synchronized(globalMonitor) {
+            val worker = Worker()
+            worker.start()
+        }
+    }
+
+    private fun getRunningStateForNumRuns(numRuns: Int): Int {
+        require(numRuns >= 0)
+        require(numRuns <= maxRuns)
+        return gateThreadRunningMask or numRuns
+    }
+
+    private fun ensureGateThread() {
+        synchronized(globalMonitor) {
+            if (gateThreadRunningState.value == getRunningStateForNumRuns(maxRuns)) {
+                return
+            }
+
+            val numRunsMask = gateThreadRunningState.getAndSet(getRunningStateForNumRuns(maxRuns))
+            if (numRunsMask == getRunningStateForNumRuns(0)) {
+                runGateThreadEvent.set()
+            } else if ((numRunsMask and gateThreadRunningMask) == 0) {
+                createGateThread()
+            }
+        }
+    }
+
+    private fun createGateThread() {
+        // TODO - C# has dedicated stack size for that thread, investigate
+        val gateThread = GateThread()
+        gateThread.start()
+    }
+
+    private fun removeWorkingWorker() {
+        var oldCounts = counts.volatileRead()
+        while (true) {
+            // TODO - normal read, not volatile
+            val newCounts = oldCounts.volatileRead()
+            System.err.println(newCounts.numProcessingWork)
+            newCounts.numProcessingWork--
+
+            if (counts.compareAndSet(oldCounts, newCounts)) {
+                break
+            }
+
+            oldCounts = counts.volatileRead()
+        }
+
+        if (numRequestedWorkers.value > 0) {
+            maybeAddWorker()
+        }
+    }
+
+    // TODO - implement
+    private fun takeActiveRequest(): Boolean {
+        return false
+    }
+
+    private fun runSafely(task: Task) {
+        try {
+            task.run()
+        } catch (e: Throwable) {
+            val thread = Thread.currentThread()
+            thread.uncaughtExceptionHandler.uncaughtException(thread, e)
+        } finally {
+            unTrackTask()
+        }
+    }
+
+    var previousGateActivitiesTimeMs = 0L
+
+//    // TODO - check if thread safe
+//    var pendingBlockingAdjustment = PendingBlockingAdjustment.None
+//
+//    // TODO - pack in DelayHelper
+//    var previousBlockingAdjustmentDelayMs = 0
+//    var previousBlockingAdjustmentDelatStartTimeMs = 0L
+//    val hasBlockingAdjustmentDelay: Boolean
+//        get() = previousBlockingAdjustmentDelayMs != 0
+    fun getNextDelay(currentTimeMs: Long): Long {
+        // TODO - implement
+
+        // const delay for now, ugly val to compile without warnings
+        val retValue = 500L + currentTimeMs - currentTimeMs
+        return retValue
+    }
+//
+//    fun hasBlockingAdjustmentDelayElapsed(currentTimeMs: Long, wasSignaledToWake: Boolean): Boolean {
+//        require(hasBlockingAdjustmentDelay)
+//        if (!wasSignaledToWake && adjustForBlockingAfterNextDelay) {
+//            return true
+//        }
+//
+//        val elapsedMsSincePreviousBlockingAdjustmentDelay =
+//            currentTimeMs - previousBlockingAdjustmentDelayStartTimeMs
+//
+//        return elapsedMsSincePreviousBlockingAdjustmentDelay >= previousBlockingAdjustmentDelayMs
+//    }
+//
+//    enum class PendingBlockingAdjustment {
+//        None, Immediately, WithDelayIfNecessary
+//    }
+//
+//    fun performBlockingAdjustment(previousDelayElapsed: Boolean): Long {
+//
+//    }
 }
