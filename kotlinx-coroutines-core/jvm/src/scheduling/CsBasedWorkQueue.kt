@@ -8,7 +8,7 @@ import kotlin.random.*
 import java.util.concurrent.*
 import kotlinx.atomicfu.*
 import kotlinx.coroutines.*
-import kotlinx.coroutines.unTrackTask
+import kotlinx.coroutines.internal.*
 
 internal class CsBasedWorkQueue(private val scheduler: CsBasedCoroutineScheduler) {
     companion object {
@@ -18,31 +18,14 @@ internal class CsBasedWorkQueue(private val scheduler: CsBasedCoroutineScheduler
     private val workItems = ConcurrentLinkedQueue<Task>()
     private var hasOutstandingThreadRequest = atomic(0)
 
-    private fun ensureThreadRequested() {
-        sched_debug("[QUEUE] ensureThreadRequested()")
-        if (hasOutstandingThreadRequest.compareAndSet(0, 1)) {
-            scheduler.requestWorker()
-        }
-    }
-
     fun enqueue(task: Task, forceGlobal: Boolean) {
-        sched_debug("[QUEUE] enqueue()")
         // TODO - remove, added to compile
         require(forceGlobal)
         workItems.add(task)
         ensureThreadRequested()
     }
 
-    fun dequeue(): Task? {
-        return workItems.poll()
-    }
-
-    fun markThreadRequestSatisifed() {
-        hasOutstandingThreadRequest.getAndSet(0)
-    }
-
     fun dispatch(): Boolean {
-        sched_debug("[QUEUE] dispatch()")
         markThreadRequestSatisifed()
 
         var workItem: Task? = dequeue() ?: return true
@@ -75,12 +58,25 @@ internal class CsBasedWorkQueue(private val scheduler: CsBasedCoroutineScheduler
         }
     }
 
-    fun dispatchWorkItem(workItem: Task) {
+    private fun ensureThreadRequested() {
+        if (hasOutstandingThreadRequest.compareAndSet(0, 1)) {
+            scheduler.requestWorker()
+        }
+    }
+
+    private fun dequeue(): Task? {
+        return workItems.poll()
+    }
+
+    private fun markThreadRequestSatisifed() {
+        hasOutstandingThreadRequest.getAndSet(0)
+    }
+
+    private fun dispatchWorkItem(workItem: Task) {
         runSafely(workItem)
     }
 
-    fun runSafely(task: Task) {
-        sched_debug("[TASK] >> Running task")
+    private fun runSafely(task: Task) {
         try {
             task.run()
         } catch (e: Throwable) {

@@ -10,7 +10,8 @@ internal class ThreadCounts(
     var numExistingThreads: Int,
     var numThreadsGoal: Int
 ) {
-    constructor() : this(0, 0, 1)
+
+    constructor(numThreadsGoal: Int) : this(0, 0, numThreadsGoal)
 
     fun copy(): ThreadCounts {
         synchronized(schedulerMonitor) {

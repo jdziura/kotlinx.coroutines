@@ -6,7 +6,7 @@ package kotlinx.coroutines.scheduling
 
 import kotlinx.atomicfu.*
 import kotlinx.coroutines.internal.*
-import kotlinx.coroutines.trackTask
+import kotlinx.coroutines.*
 import java.io.*
 import java.lang.Runnable
 import java.util.*
@@ -19,18 +19,30 @@ import kotlin.math.*
 internal val schedulerMonitor = Object()
 
 internal const val SCHED_DEBUG = false
-internal fun sched_debug(msg: String) {
+internal fun schedDebug(msg: String) {
     if (SCHED_DEBUG)
         System.err.println(msg)
 }
 
 internal class CsBasedCoroutineScheduler(
+    @JvmField val corePoolSize: Int,
+    @JvmField val maxPoolSize: Int,
     @JvmField val schedulerName: String = DEFAULT_SCHEDULER_NAME
 ) : Scheduler {
+    init {
+        require(corePoolSize >= CoroutineScheduler.MIN_SUPPORTED_POOL_SIZE) {
+            "Core pool size $corePoolSize should be at least ${CoroutineScheduler.MIN_SUPPORTED_POOL_SIZE}"
+        }
+        require(maxPoolSize >= corePoolSize) {
+            "Max pool size $maxPoolSize should be greater than or equals to core pool size $corePoolSize"
+        }
+        require(maxPoolSize <= CoroutineScheduler.MAX_SUPPORTED_POOL_SIZE) {
+            "Max pool size $maxPoolSize should not exceed maximal supported number of threads ${CoroutineScheduler.MAX_SUPPORTED_POOL_SIZE}"
+        }
+    }
 
     companion object {
-        const val MIN_THREADS_GOAL = 64
-        const val MAX_THREADS_GOAL = 128
+        private const val THREAD_TIMEOUT_MS = 50L
     }
 
     internal inner class Worker : Thread() {
@@ -44,20 +56,33 @@ internal class CsBasedCoroutineScheduler(
         override fun run() = runWorker()
 
         private fun runWorker() {
-            sched_debug("[WORKER] created")
-//            System.err.println("Active workers: ${activeWorkers.incrementAndGet()}")
+            schedDebug("[$name] created")
             while (true) {
-                doWork()
+                while (true) {
+                    var result = false
+                    try {
+                        // TODO - change to combined with spinlock as in C#
+                        result = semaphore.tryAcquire(THREAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    } catch (e: Throwable) {
+                        val thread = Thread.currentThread()
+                        thread.uncaughtExceptionHandler.uncaughtException(thread, e)
+                    } finally {
+                        if (result) {
+                            doWork()
+                        } else {
+                            break
+                        }
+                    }
+                }
                 if (shouldExitWorker()) {
-                    sched_debug("[WORKER] exiting")
-//                    System.err.println("Active workers: ${activeWorkers.decrementAndGet()}")
+                    schedDebug("[$name] exiting")
                     break
                 }
             }
         }
 
         private fun doWork() {
-            sched_debug("[WORKER] doWork()")
+            schedDebug("[$name] doWork()")
             var alreadyRemovedWorkingWorker = false
             while (takeActiveRequest()) {
                 if (!workQueue.dispatch()) {
@@ -84,7 +109,7 @@ internal class CsBasedCoroutineScheduler(
                 }
 
                 counts.numExistingThreads--
-                counts.numThreadsGoal = max(1, min(counts.numExistingThreads, counts.numThreadsGoal))
+                counts.numThreadsGoal = max(minThreadsGoal, min(counts.numExistingThreads, counts.numThreadsGoal))
 
                 hillClimber.forceChange(counts.numThreadsGoal, HillClimbing.StateOrTransition.ThreadTimedOut)
                 return true
@@ -92,23 +117,27 @@ internal class CsBasedCoroutineScheduler(
         }
     }
 
+    private val numProcessors = Runtime.getRuntime().availableProcessors()
+    val minThreadsGoal = max(corePoolSize, min(numProcessors, maxPoolSize))
+    val maxThreadsGoal = maxPoolSize
+
     private val workQueue = CsBasedWorkQueue(this)
     private val numRequestedWorkers = atomic(0)
-    private val counts = ThreadCounts()
+    private val counts = ThreadCounts(minThreadsGoal)
 
     private var currentSampleStartTime = 0L
     private var threadAdjustmentIntervalMs = 0
     private var completionCount = 0
     private var priorCompletionCount = 0
-    private val hillClimber = HillClimbing()
+    private val hillClimber = HillClimbing(minThreadsGoal, maxThreadsGoal)
     private var nextCompletedWorkRequestsTime = 0L
     private var priorCompletedWorkRequestTime = 0L
     private var nextThreadId = atomic(1)
 
-    private var activeWorkers = atomic(0)
+    private val semaphore = Semaphore(0)
 
     override fun dispatch(block: Runnable, taskContext: TaskContext, tailDispatch: Boolean) {
-        sched_debug("[SCHEDULER] dispatch()")
+        schedDebug("[$schedulerName] dispatch()")
         trackTask()
         val task = createTask(block, taskContext)
         workQueue.enqueue(task, true)
@@ -135,7 +164,7 @@ internal class CsBasedCoroutineScheduler(
     }
 
     fun requestWorker() {
-        sched_debug("[SCHEDULER] requestWorker()")
+        schedDebug("[$schedulerName] requestWorker()")
         numRequestedWorkers.incrementAndGet()
         maybeAddWorker()
     }
@@ -213,24 +242,31 @@ internal class CsBasedCoroutineScheduler(
                 return false
             }
 
-            sched_debug("[SCHEDULER] shouldAdjustMaxWorkersActive() returns true")
+            schedDebug("[$schedulerName] shouldAdjustMaxWorkersActive() returns true")
             return true
         }
     }
 
     private fun maybeAddWorker() {
-        sched_debug("[SCHEDULER] maybeAddWorker()")
+        schedDebug("[$schedulerName] maybeAddWorker()")
         val toCreate: Int
+        val toRelease: Int
 
         synchronized(schedulerMonitor) {
             if (counts.numProcessingWork >= counts.numThreadsGoal) {
                 return
             }
 
-            counts.numProcessingWork++
-            val newNumExistingThreads = max(counts.numExistingThreads, counts.numProcessingWork)
+            val newNumProcessingWork = counts.numProcessingWork + 1
+            val newNumExistingThreads = max(counts.numExistingThreads, newNumProcessingWork)
             toCreate = newNumExistingThreads - counts.numExistingThreads
+            toRelease = newNumProcessingWork - counts.numProcessingWork
             counts.numExistingThreads = newNumExistingThreads
+            counts.numProcessingWork = newNumProcessingWork
+        }
+
+        if (toRelease > 0) {
+            semaphore.release(toRelease)
         }
 
         repeat(toCreate) {

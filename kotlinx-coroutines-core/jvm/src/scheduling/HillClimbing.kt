@@ -7,7 +7,10 @@ package kotlinx.coroutines.scheduling
 import kotlin.random.Random
 import kotlin.math.*
 
-internal class HillClimbing {
+internal class HillClimbing(
+    private val minThreads: Int,
+    private val maxThreads: Int
+) {
     private class Complex(val re: Double, val im: Double) {
         operator fun plus(other: Complex): Complex {
             return Complex(re + other.re, im + other.im)
@@ -174,10 +177,6 @@ internal class HillClimbing {
         var newThreadWaveMagnitude = (0.5 + (currentControlSetting * averageThroughputNoise * TARGET_SIGNAL_TO_NOISE_RATIO * THREAD_MAGNITUDE_MULTIPLIER * 2.0)).toInt()
         newThreadWaveMagnitude = min(newThreadWaveMagnitude, MAX_THREAD_WAVE_MAGNITUDE)
         newThreadWaveMagnitude = max(newThreadWaveMagnitude, 1)
-
-        // TODO - get max/min threads from scheduler
-        val maxThreads = CsBasedCoroutineScheduler.MAX_THREADS_GOAL
-        val minThreads = CsBasedCoroutineScheduler.MIN_THREADS_GOAL
 
         currentControlSetting = min(currentControlSetting, (maxThreads - newThreadWaveMagnitude).toDouble())
         currentControlSetting = max(currentControlSetting, minThreads.toDouble())
