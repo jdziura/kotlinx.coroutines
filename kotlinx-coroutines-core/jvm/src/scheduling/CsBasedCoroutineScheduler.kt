@@ -18,7 +18,7 @@ import kotlin.math.*
 
 internal val schedulerMonitor = Object()
 
-internal const val SCHED_DEBUG = false
+internal const val SCHED_DEBUG = true
 internal fun schedDebug(msg: String) {
     if (SCHED_DEBUG)
         System.err.println(msg)
@@ -42,7 +42,7 @@ internal class CsBasedCoroutineScheduler(
     }
 
     companion object {
-        private const val THREAD_TIMEOUT_MS = 50L
+        private const val THREAD_TIMEOUT_MS = 1L
     }
 
     internal inner class Worker : Thread() {
@@ -118,7 +118,7 @@ internal class CsBasedCoroutineScheduler(
     }
 
     private val numProcessors = Runtime.getRuntime().availableProcessors()
-    val minThreadsGoal = max(corePoolSize, min(numProcessors, maxPoolSize))
+    val minThreadsGoal = corePoolSize
     val maxThreadsGoal = maxPoolSize
 
     private val workQueue = CsBasedWorkQueue(this)
@@ -160,7 +160,6 @@ internal class CsBasedCoroutineScheduler(
     }
 
     override fun shutdown(timeout: Long) {
-
     }
 
     fun requestWorker() {
@@ -181,9 +180,8 @@ internal class CsBasedCoroutineScheduler(
     }
 
     private fun adjustMaxWorkersActive() {
+        var addWorker = false
         synchronized(schedulerMonitor) {
-            var addWorker = false
-
             if (counts.numProcessingWork > counts.numThreadsGoal) {
                 return
             }
@@ -210,10 +208,9 @@ internal class CsBasedCoroutineScheduler(
                 priorCompletedWorkRequestTime = currentTicks
                 currentSampleStartTime = currentTicks
             }
-
-            if (addWorker) {
-                maybeAddWorker()
-            }
+        }
+        if (addWorker) {
+            maybeAddWorker()
         }
     }
 
@@ -229,7 +226,7 @@ internal class CsBasedCoroutineScheduler(
     }
 
     private fun shouldAdjustMaxWorkersActive(currentTimeMs: Long): Boolean {
-        synchronized(this) {
+        synchronized(schedulerMonitor) {
             val priorTime = priorCompletedWorkRequestTime
             val requiredInterval = nextCompletedWorkRequestsTime - priorTime
             val elapsedInterval = currentTimeMs - priorTime
@@ -280,16 +277,8 @@ internal class CsBasedCoroutineScheduler(
     }
 
     private fun removeWorkingWorker() {
-        var oldCounts = counts.copy()
-        while (true) {
-            val newCounts = oldCounts.copy()
-            newCounts.numProcessingWork--
-
-            if (counts.compareAndSet(oldCounts, newCounts)) {
-                break
-            }
-
-            oldCounts = counts.copy()
+        synchronized(schedulerMonitor) {
+            counts.numProcessingWork--
         }
 
         if (numRequestedWorkers.value > 0) {
