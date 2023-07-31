@@ -75,6 +75,8 @@ internal class CsBasedWorkQueue(private val scheduler: CsBasedCoroutineScheduler
     }
 
     private fun dispatchWorkItem(workItem: Task) {
+        scheduler.beforeTask(workItem.mode)
         runSafely(workItem)
+        scheduler.afterTask(workItem.mode)
     }
 }

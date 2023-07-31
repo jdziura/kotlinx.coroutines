@@ -8,23 +8,25 @@ package kotlinx.coroutines.scheduling
 internal class ThreadCounts(
     var numProcessingWork: Int,
     var numExistingThreads: Int,
-    var numThreadsGoal: Int
+    var numThreadsGoal: Int,
+    var scheduler: CsBasedCoroutineScheduler
 ) {
 
-    constructor(numThreadsGoal: Int) : this(0, 0, numThreadsGoal)
+    constructor(numThreadsGoal: Int, scheduler: CsBasedCoroutineScheduler) : this(0, 0, numThreadsGoal, scheduler)
 
     fun copy(): ThreadCounts {
-        synchronized(schedulerMonitor) {
-            return ThreadCounts(numProcessingWork, numExistingThreads, numThreadsGoal)
+        synchronized(scheduler) {
+            return ThreadCounts(numProcessingWork, numExistingThreads, numThreadsGoal, scheduler)
         }
     }
 
     fun compareAndSet(oldCounts: ThreadCounts, newCounts: ThreadCounts): Boolean {
-        synchronized(schedulerMonitor) {
+        synchronized(scheduler) {
             if (this == oldCounts) {
                 numProcessingWork = newCounts.numProcessingWork
                 numExistingThreads = newCounts.numExistingThreads
                 numThreadsGoal = newCounts.numThreadsGoal
+                scheduler = newCounts.scheduler
                 return true
             }
             return false
@@ -40,6 +42,7 @@ internal class ThreadCounts(
         if (numProcessingWork != other.numProcessingWork) return false
         if (numExistingThreads != other.numExistingThreads) return false
         if (numThreadsGoal != other.numThreadsGoal) return false
+        if (scheduler != other.scheduler) return false
 
         return true
     }
