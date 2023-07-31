@@ -30,7 +30,9 @@ internal class CsBasedWorkQueue(private val scheduler: CsBasedCoroutineScheduler
 
         var workItem: Task? = dequeue() ?: return true
 
-        ensureThreadRequested()
+        // TODO - check if it is required here.
+        // for now removed, creates excess threads
+//        ensureThreadRequested()
 
         var startTickCount = System.currentTimeMillis()
 
@@ -64,7 +66,7 @@ internal class CsBasedWorkQueue(private val scheduler: CsBasedCoroutineScheduler
         }
     }
 
-    private fun dequeue(): Task? {
+    fun dequeue(): Task? {
         return workItems.poll()
     }
 
@@ -74,16 +76,5 @@ internal class CsBasedWorkQueue(private val scheduler: CsBasedCoroutineScheduler
 
     private fun dispatchWorkItem(workItem: Task) {
         runSafely(workItem)
-    }
-
-    private fun runSafely(task: Task) {
-        try {
-            task.run()
-        } catch (e: Throwable) {
-            val thread = Thread.currentThread()
-            thread.uncaughtExceptionHandler.uncaughtException(thread, e)
-        } finally {
-            unTrackTask()
-        }
     }
 }

@@ -12,16 +12,28 @@ import java.lang.Runnable
 import java.util.*
 import java.util.concurrent.*
 import java.util.concurrent.atomic.*
+import java.util.concurrent.locks.*
 import java.util.concurrent.locks.LockSupport.*
 import kotlin.random.*
 import kotlin.math.*
 
 internal val schedulerMonitor = Object()
 
-internal const val SCHED_DEBUG = true
+internal const val SCHED_DEBUG = false
 internal fun schedDebug(msg: String) {
     if (SCHED_DEBUG)
         System.err.println(msg)
+}
+
+internal fun runSafely(task: Task) {
+    try {
+        task.run()
+    } catch (e: Throwable) {
+        val thread = Thread.currentThread()
+        thread.uncaughtExceptionHandler.uncaughtException(thread, e)
+    } finally {
+        unTrackTask()
+    }
 }
 
 internal class CsBasedCoroutineScheduler(
@@ -41,15 +53,13 @@ internal class CsBasedCoroutineScheduler(
         }
     }
 
-    companion object {
-        private const val THREAD_TIMEOUT_MS = 1L
-    }
-
     internal inner class Worker : Thread() {
         init {
             isDaemon = true
             name = "$schedulerName-worker-${nextThreadId.getAndIncrement()}"
         }
+
+        val inStack = atomic(false)
 
         inline val scheduler get() = this@CsBasedCoroutineScheduler
 
@@ -57,26 +67,10 @@ internal class CsBasedCoroutineScheduler(
 
         private fun runWorker() {
             schedDebug("[$name] created")
-            while (true) {
-                while (true) {
-                    var result = false
-                    try {
-                        // TODO - change to combined with spinlock as in C#
-                        result = semaphore.tryAcquire(THREAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                    } catch (e: Throwable) {
-                        val thread = Thread.currentThread()
-                        thread.uncaughtExceptionHandler.uncaughtException(thread, e)
-                    } finally {
-                        if (result) {
-                            doWork()
-                        } else {
-                            break
-                        }
-                    }
-                }
+            while (!isTerminated) {
+                doWork()
                 if (shouldExitWorker()) {
-                    schedDebug("[$name] exiting")
-                    break
+                    tryPark()
                 }
             }
         }
@@ -115,10 +109,23 @@ internal class CsBasedCoroutineScheduler(
                 return true
             }
         }
+
+        private fun tryPark() {
+            if (inStack.getAndSet(true) == false) {
+                synchronized(workerStack) { workerStack.push(this) }
+            }
+
+            while (inStack.value == true) {
+                if (isTerminated) break
+                interrupted()
+                schedDebug("[$name] park()")
+                park()
+            }
+        }
     }
 
     private val numProcessors = Runtime.getRuntime().availableProcessors()
-    val minThreadsGoal = corePoolSize
+    val minThreadsGoal = max(corePoolSize, min(maxPoolSize, numProcessors))
     val maxThreadsGoal = maxPoolSize
 
     private val workQueue = CsBasedWorkQueue(this)
@@ -134,7 +141,9 @@ internal class CsBasedCoroutineScheduler(
     private var priorCompletedWorkRequestTime = 0L
     private var nextThreadId = atomic(1)
 
-    private val semaphore = Semaphore(0)
+    private val _isTerminated = atomic(false)
+    val isTerminated: Boolean get() = _isTerminated.value
+    private val workerStack = Stack<Worker>()
 
     override fun dispatch(block: Runnable, taskContext: TaskContext, tailDispatch: Boolean) {
         schedDebug("[$schedulerName] dispatch()")
@@ -160,6 +169,37 @@ internal class CsBasedCoroutineScheduler(
     }
 
     override fun shutdown(timeout: Long) {
+        if (!_isTerminated.compareAndSet(false, true)) return
+        val currentWorker = currentWorker()
+        while (true) {
+            val worker: Worker?
+            synchronized(workerStack) {
+                worker = if (workerStack.empty()) null else workerStack.pop()
+            }
+            if (worker == null) break
+            if (worker === currentWorker) continue
+            while (worker.isAlive) {
+                LockSupport.unpark(worker)
+                worker.join(timeout)
+            }
+        }
+
+        while (true) {
+            val task = workQueue.dequeue() ?: break
+            runSafely(task)
+        }
+    }
+
+    private fun currentWorker(): Worker? = (Thread.currentThread() as? Worker)?.takeIf { it.scheduler == this }
+
+    private fun tryUnpark(): Boolean {
+        synchronized(workerStack) {
+            if (workerStack.empty()) return false
+            val worker = workerStack.pop()
+            worker.inStack.getAndSet(false)
+            LockSupport.unpark(worker)
+            return true
+        }
     }
 
     fun requestWorker() {
@@ -247,7 +287,6 @@ internal class CsBasedCoroutineScheduler(
     private fun maybeAddWorker() {
         schedDebug("[$schedulerName] maybeAddWorker()")
         val toCreate: Int
-        val toRelease: Int
 
         synchronized(schedulerMonitor) {
             if (counts.numProcessingWork >= counts.numThreadsGoal) {
@@ -257,16 +296,12 @@ internal class CsBasedCoroutineScheduler(
             val newNumProcessingWork = counts.numProcessingWork + 1
             val newNumExistingThreads = max(counts.numExistingThreads, newNumProcessingWork)
             toCreate = newNumExistingThreads - counts.numExistingThreads
-            toRelease = newNumProcessingWork - counts.numProcessingWork
             counts.numExistingThreads = newNumExistingThreads
             counts.numProcessingWork = newNumProcessingWork
         }
 
-        if (toRelease > 0) {
-            semaphore.release(toRelease)
-        }
-
         repeat(toCreate) {
+            if (tryUnpark()) return
             createWorker()
         }
     }
