@@ -61,9 +61,14 @@ internal class CsBasedWorkQueue(private val scheduler: CsBasedCoroutineScheduler
     }
 
     private fun ensureThreadRequested() {
-        if (hasOutstandingThreadRequest.compareAndSet(0, 1)) {
+        // TODO - check if other fix possible
+        // Scenario not working for now:
+        // 100 blocking tasks launched, since contention some fail this if and ~30 get created, since
+        // blocking adjustment adds at most 1 thread at a time
+        // possible other fix - add more threads at a time during blocking adjustment
+//        if (hasOutstandingThreadRequest.compareAndSet(0, 1)) {
             scheduler.requestWorker()
-        }
+//        }
     }
 
     fun dequeue(): Task? {
@@ -75,7 +80,7 @@ internal class CsBasedWorkQueue(private val scheduler: CsBasedCoroutineScheduler
     }
 
     private fun dispatchWorkItem(workItem: Task) {
-        scheduler.beforeTask(workItem.mode)
+//        scheduler.beforeTask(workItem.mode)
         runSafely(workItem)
         scheduler.afterTask(workItem.mode)
     }

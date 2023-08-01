@@ -223,7 +223,8 @@ internal class CsBasedCoroutineScheduler(
     private val threadsToAddWithoutDelay = numProcessors
     private val threadsPerDelayStep = numProcessors
     val minThreads = 1
-    val maxThreads = maxPoolSize
+//    val maxThreads = maxPoolSize
+    val maxThreads = 1024
 
     private val workQueue = CsBasedWorkQueue(this)
     private val numRequestedWorkers = atomic(0)
@@ -270,6 +271,9 @@ internal class CsBasedCoroutineScheduler(
         trackTask()
         val task = createTask(block, taskContext)
         workQueue.enqueue(task, true)
+        if (task.mode == TASK_PROBABLY_BLOCKING) {
+            notifyThreadBlocked()
+        }
     }
 
     override fun createTask(block: Runnable, taskContext: TaskContext): Task {
@@ -382,7 +386,7 @@ internal class CsBasedCoroutineScheduler(
     }
 
     private fun shouldStopProcessingWorkNow(): Boolean {
-        synchronized(schedulerMonitor) {
+        synchronized(this) {
             if (counts.numProcessingWork <= counts.numThreadsGoal) {
                 return false
             }
@@ -393,7 +397,7 @@ internal class CsBasedCoroutineScheduler(
     }
 
     private fun shouldAdjustMaxWorkersActive(currentTimeMs: Long): Boolean {
-        synchronized(schedulerMonitor) {
+        synchronized(this) {
             val priorTime = priorCompletedWorkRequestTime
             val requiredInterval = nextCompletedWorkRequestsTime - priorTime
             val elapsedInterval = currentTimeMs - priorTime
@@ -415,7 +419,7 @@ internal class CsBasedCoroutineScheduler(
         schedDebug("[$schedulerName] maybeAddWorker()")
         val toCreate: Int
 
-        synchronized(schedulerMonitor) {
+        synchronized(this) {
             if (counts.numProcessingWork >= counts.numThreadsGoal) {
                 return
             }
@@ -439,7 +443,7 @@ internal class CsBasedCoroutineScheduler(
     }
 
     private fun removeWorkingWorker() {
-        synchronized(schedulerMonitor) {
+        synchronized(this) {
             counts.numProcessingWork--
         }
 
@@ -495,7 +499,7 @@ internal class CsBasedCoroutineScheduler(
 
     private fun performBlockingAdjustmentSync(previousDelayElapsed: Boolean): Pair<Long, Boolean> {
         var addWorker = false
-        synchronized(schedulerMonitor) {
+        synchronized(this) {
             require(pendingBlockingAdjustment != PendingBlockingAdjustment.None)
             pendingBlockingAdjustment = PendingBlockingAdjustment.None
             val targetThreadsGoal = targetThreadsForBlockingAdjustment
@@ -573,7 +577,7 @@ internal class CsBasedCoroutineScheduler(
     // In ThreadPool, it is invoked when thread actually is blocked, here when task starts
     private fun notifyThreadBlocked() {
         var shouldWakeGateThread = false
-        synchronized(schedulerMonitor) {
+        synchronized(this) {
             numBlockingTasks++
             require(numBlockingTasks > 0)
 
@@ -596,7 +600,7 @@ internal class CsBasedCoroutineScheduler(
     // Similar as above, just notifies completion of potentially blocking task.
     private fun notifyThreadUnblocked() {
         var shouldWakeGateThread = false
-        synchronized(schedulerMonitor) {
+        synchronized(this) {
             numBlockingTasks--
             if (pendingBlockingAdjustment != PendingBlockingAdjustment.Immediately &&
                 numThreadsAddedDueToBlocking > 0 &&
@@ -612,12 +616,12 @@ internal class CsBasedCoroutineScheduler(
         }
     }
 
-    fun beforeTask(taskMode: Int) {
-        // TODO - check if better to increment earlier (during dispatch())
-        if (taskMode == TASK_PROBABLY_BLOCKING) {
-            notifyThreadBlocked()
-        }
-    }
+//    fun beforeTask(taskMode: Int) {
+        // TODO - check if better to increment earlier or now (during dispatch())
+//        if (taskMode == TASK_PROBABLY_BLOCKING) {
+//            notifyThreadBlocked()
+//        }
+//    }
 
     fun afterTask(taskMode: Int) {
         if (taskMode == TASK_PROBABLY_BLOCKING) {
