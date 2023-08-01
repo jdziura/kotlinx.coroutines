@@ -58,6 +58,8 @@ internal class CsBasedCoroutineScheduler(
         private const val GATE_ACTIVITIES_PERIOD_MS = DelayHelper.GATE_ACTIVITIES_PERIOD_MS
         private const val DELAY_STEP_MS = 25L
         private const val MAX_DELAY_MS = 250L
+        private const val MAX_THREADS = CoroutineScheduler.MAX_SUPPORTED_POOL_SIZE
+        private const val MIN_THREADS = CoroutineScheduler.MIN_SUPPORTED_POOL_SIZE
     }
 
     private enum class PendingBlockingAdjustment {
@@ -117,7 +119,7 @@ internal class CsBasedCoroutineScheduler(
                 }
 
                 counts.numExistingThreads--
-                counts.numThreadsGoal = max(minThreads, min(counts.numExistingThreads, counts.numThreadsGoal))
+                counts.numThreadsGoal = max(MIN_THREADS, min(counts.numExistingThreads, counts.numThreadsGoal))
 
                 hillClimber.forceChange(counts.numThreadsGoal, HillClimbing.StateOrTransition.ThreadTimedOut)
                 return true
@@ -194,7 +196,7 @@ internal class CsBasedCoroutineScheduler(
 
                         var addWorker = false
                         synchronized(this@CsBasedCoroutineScheduler) {
-                            if (counts.numProcessingWork < maxThreads &&
+                            if (counts.numProcessingWork < maxPoolSize &&
                                 counts.numProcessingWork >= counts.numThreadsGoal) {
 
                                 counts.numThreadsGoal = counts.numProcessingWork + 1
@@ -222,9 +224,6 @@ internal class CsBasedCoroutineScheduler(
     private val numProcessors = Runtime.getRuntime().availableProcessors()
     private val threadsToAddWithoutDelay = numProcessors
     private val threadsPerDelayStep = numProcessors
-    val minThreads = 1
-//    val maxThreads = maxPoolSize
-    val maxThreads = 1024
 
     private val workQueue = CsBasedWorkQueue(this)
     private val numRequestedWorkers = atomic(0)
@@ -234,7 +233,7 @@ internal class CsBasedCoroutineScheduler(
     private var threadAdjustmentIntervalMs = 0
     private var completionCount = 0
     private var priorCompletionCount = 0
-    private val hillClimber = HillClimbing(minThreads, maxThreads)
+    private val hillClimber = HillClimbing(MIN_THREADS, maxPoolSize)
     private var nextCompletedWorkRequestsTime = 0L
     private var priorCompletedWorkRequestTime = 0L
     private var nextThreadId = atomic(1)
@@ -253,27 +252,27 @@ internal class CsBasedCoroutineScheduler(
     private var numThreadsAddedDueToBlocking = 0
     
     private val targetThreadsForBlockingAdjustment: Int
-        // TODO - verify synchronization
+        // TODO - verify synchronization (this should be used only with lock taken)
+        // TODO - decide if should use corePoolSize or MIN_THREADS
         get() {
             return if (numBlockingTasks <= 0) {
-                minThreads
+                corePoolSize
             } else {
-                min(minThreads + numBlockingTasks, maxThreads)
+                min(corePoolSize + numBlockingTasks, MAX_THREADS)
             }
         }
 
-    // TODO - check start value
-    // TODO - check if needs to be atomic
+    // TODO - verify synchronization
     private var pendingBlockingAdjustment = PendingBlockingAdjustment.None
 
     override fun dispatch(block: Runnable, taskContext: TaskContext, tailDispatch: Boolean) {
         schedDebug("[$schedulerName] dispatch()")
         trackTask()
         val task = createTask(block, taskContext)
-        workQueue.enqueue(task, true)
         if (task.mode == TASK_PROBABLY_BLOCKING) {
             notifyThreadBlocked()
         }
+        workQueue.enqueue(task, true)
     }
 
     override fun createTask(block: Runnable, taskContext: TaskContext): Task {
@@ -410,7 +409,6 @@ internal class CsBasedCoroutineScheduler(
                 return false
             }
 
-            schedDebug("[$schedulerName] shouldAdjustMaxWorkersActive() returns true")
             return true
         }
     }
@@ -523,10 +521,11 @@ internal class CsBasedCoroutineScheduler(
                 return (0L to false)
             }
 
-            val configuredMaxThreadsWithoutDelay = min(minThreads + threadsToAddWithoutDelay, maxThreads)
+            // TODO - decide corePoolSize or MIN_THREADS
+            val configuredMaxThreadsWithoutDelay = min(corePoolSize + threadsToAddWithoutDelay, MAX_THREADS)
 
             do {
-                val maxThreadsGoalWithoutDelay = max(configuredMaxThreadsWithoutDelay, min(counts.numExistingThreads, maxThreads))
+                val maxThreadsGoalWithoutDelay = max(configuredMaxThreadsWithoutDelay, min(counts.numExistingThreads, MAX_THREADS))
                 val targetThreadsGoalWithoutDelay = min(targetThreadsGoal, maxThreadsGoalWithoutDelay)
                 val newNumThreadsGoal = if (numThreadsGoal < targetThreadsGoalWithoutDelay) {
                     targetThreadsGoalWithoutDelay
@@ -617,7 +616,7 @@ internal class CsBasedCoroutineScheduler(
     }
 
 //    fun beforeTask(taskMode: Int) {
-        // TODO - check if better to increment earlier or now (during dispatch())
+//        TODO - check if better to increment earlier or now (during dispatch())
 //        if (taskMode == TASK_PROBABLY_BLOCKING) {
 //            notifyThreadBlocked()
 //        }
