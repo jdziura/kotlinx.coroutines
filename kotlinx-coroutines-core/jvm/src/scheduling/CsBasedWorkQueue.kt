@@ -15,7 +15,7 @@ internal class CsBasedWorkQueue(private val scheduler: CsBasedCoroutineScheduler
         private const val DISPATCH_QUANTUM_MS = 30L
     }
 
-    private val workItems = ConcurrentLinkedQueue<Task>()
+    val workItems = ConcurrentLinkedQueue<Task>()
     private var hasOutstandingThreadRequest = atomic(0)
 
     fun enqueue(task: Task, forceGlobal: Boolean) {

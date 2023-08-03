@@ -8,6 +8,7 @@ import kotlinx.atomicfu.*
 import kotlinx.coroutines.internal.*
 import kotlinx.coroutines.*
 import java.io.*
+import java.lang.Exception
 import java.lang.Runnable
 import java.util.*
 import java.util.concurrent.*
@@ -60,7 +61,62 @@ internal class CsBasedCoroutineScheduler(
         private const val MAX_DELAY_MS = 250L
         private const val MAX_THREADS = CoroutineScheduler.MAX_SUPPORTED_POOL_SIZE
         private const val MIN_THREADS = CoroutineScheduler.MIN_SUPPORTED_POOL_SIZE
+        private const val THREAD_TIMEOUT_MS = 20 * 1000L
     }
+
+    private val numProcessors = Runtime.getRuntime().availableProcessors()
+    private val threadsToAddWithoutDelay = numProcessors
+    private val threadsPerDelayStep = numProcessors
+
+    private val workQueue = CsBasedWorkQueue(this)
+    private val numRequestedWorkers = atomic(0)
+    private val counts = ThreadCounts(corePoolSize, this)
+
+    private var currentSampleStartTime = 0L
+    private var threadAdjustmentIntervalMs = 0
+    private var completionCount = 0
+    private var priorCompletionCount = 0
+
+    // TODO - verify bounds
+    private val hillClimber = HillClimbing(corePoolSize, maxPoolSize)
+    private var nextCompletedWorkRequestsTime = 0L
+    private var priorCompletedWorkRequestTime = 0L
+    private var nextThreadId = atomic(1)
+
+    private val _isTerminated = atomic(false)
+    val isTerminated: Boolean get() = _isTerminated.value
+    private val workerStack = Stack<Worker>()
+
+    private var gateThreadRunningState = atomic(0)
+    private val runGateThreadEvent = AutoResetEvent(true)
+    private val delayEvent = AutoResetEvent(false)
+    private val delayHelper = DelayHelper()
+    private val lastDequeueTime = atomic(0L)
+
+    private val semaphore = Semaphore(0)
+
+    private var numBlockingTasks = 0
+    private var numThreadsAddedDueToBlocking = 0
+
+    private val minThreadsGoal: Int
+        get() {
+            return min(counts.numThreadsGoal, targetThreadsForBlockingAdjustment)
+        }
+
+    private val targetThreadsForBlockingAdjustment: Int
+        // TODO - verify synchronization (this should be used only with lock taken)
+        // TODO - decide if should use corePoolSize or MIN_THREADS
+        get() {
+            return if (numBlockingTasks <= 0) {
+                corePoolSize
+            } else {
+                min(corePoolSize + numBlockingTasks, MAX_THREADS)
+            }
+        }
+
+    // TODO - verify synchronization
+    private var pendingBlockingAdjustment = PendingBlockingAdjustment.None
+
 
     private enum class PendingBlockingAdjustment {
         None,
@@ -83,7 +139,18 @@ internal class CsBasedCoroutineScheduler(
         private fun runWorker() {
             schedDebug("[$name] created")
             while (!isTerminated) {
-                doWork()
+                while (!isTerminated) {
+                    try {
+                        if (semaphore.tryAcquire(THREAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                            doWork()
+                        } else {
+                            break
+                        }
+                    } catch (e: InterruptedException) {
+                        this.interrupt()
+                        break
+                    }
+                }
                 if (shouldExitWorker()) {
                     tryPark()
                 }
@@ -119,8 +186,7 @@ internal class CsBasedCoroutineScheduler(
                 }
 
                 counts.numExistingThreads--
-                counts.numThreadsGoal = max(MIN_THREADS, min(counts.numExistingThreads, counts.numThreadsGoal))
-
+                counts.numThreadsGoal = max(minThreadsGoal, min(counts.numExistingThreads, counts.numThreadsGoal))
                 hillClimber.forceChange(counts.numThreadsGoal, HillClimbing.StateOrTransition.ThreadTimedOut)
                 return true
             }
@@ -128,7 +194,9 @@ internal class CsBasedCoroutineScheduler(
 
         private fun tryPark() {
             if (inStack.getAndSet(true) == false) {
-                synchronized(workerStack) { workerStack.push(this) }
+                synchronized(workerStack) {
+                    workerStack.push(this)
+                }
             }
 
             while (inStack.value == true) {
@@ -196,7 +264,7 @@ internal class CsBasedCoroutineScheduler(
 
                         var addWorker = false
                         synchronized(this@CsBasedCoroutineScheduler) {
-                            if (counts.numProcessingWork < maxPoolSize &&
+                            if (counts.numProcessingWork < MAX_THREADS &&
                                 counts.numProcessingWork >= counts.numThreadsGoal) {
 
                                 counts.numThreadsGoal = counts.numProcessingWork + 1
@@ -220,50 +288,6 @@ internal class CsBasedCoroutineScheduler(
             }
         }
     }
-
-    private val numProcessors = Runtime.getRuntime().availableProcessors()
-    private val threadsToAddWithoutDelay = numProcessors
-    private val threadsPerDelayStep = numProcessors
-
-    private val workQueue = CsBasedWorkQueue(this)
-    private val numRequestedWorkers = atomic(0)
-    private val counts = ThreadCounts(corePoolSize, this)
-
-    private var currentSampleStartTime = 0L
-    private var threadAdjustmentIntervalMs = 0
-    private var completionCount = 0
-    private var priorCompletionCount = 0
-    private val hillClimber = HillClimbing(MIN_THREADS, maxPoolSize)
-    private var nextCompletedWorkRequestsTime = 0L
-    private var priorCompletedWorkRequestTime = 0L
-    private var nextThreadId = atomic(1)
-
-    private val _isTerminated = atomic(false)
-    val isTerminated: Boolean get() = _isTerminated.value
-    private val workerStack = Stack<Worker>()
-
-    private var gateThreadRunningState = atomic(0)
-    private val runGateThreadEvent = AutoResetEvent(true)
-    private val delayEvent = AutoResetEvent(false)
-    private val delayHelper = DelayHelper()
-    private val lastDequeueTime = atomic(0L)
-    
-    private var numBlockingTasks = 0
-    private var numThreadsAddedDueToBlocking = 0
-    
-    private val targetThreadsForBlockingAdjustment: Int
-        // TODO - verify synchronization (this should be used only with lock taken)
-        // TODO - decide if should use corePoolSize or MIN_THREADS
-        get() {
-            return if (numBlockingTasks <= 0) {
-                corePoolSize
-            } else {
-                min(corePoolSize + numBlockingTasks, MAX_THREADS)
-            }
-        }
-
-    // TODO - verify synchronization
-    private var pendingBlockingAdjustment = PendingBlockingAdjustment.None
 
     override fun dispatch(block: Runnable, taskContext: TaskContext, tailDispatch: Boolean) {
         schedDebug("[$schedulerName] dispatch()")
@@ -298,6 +322,8 @@ internal class CsBasedCoroutineScheduler(
         delayEvent.set()
         runGateThreadEvent.set()
 
+        semaphore.release(MAX_THREADS)
+
         val currentWorker = currentWorker()
         while (true) {
             val worker: Worker?
@@ -325,6 +351,7 @@ internal class CsBasedCoroutineScheduler(
             if (workerStack.empty()) return false
             val worker = workerStack.pop()
             worker.inStack.getAndSet(false)
+            schedDebug("${worker.name} unpark()")
             LockSupport.unpark(worker)
             return true
         }
@@ -352,7 +379,8 @@ internal class CsBasedCoroutineScheduler(
     private fun adjustMaxWorkersActive() {
         var addWorker = false
         synchronized(this) {
-            if (counts.numProcessingWork > counts.numThreadsGoal) {
+            if (counts.numProcessingWork > counts.numThreadsGoal ||
+                pendingBlockingAdjustment != PendingBlockingAdjustment.None) {
                 return
             }
 
@@ -409,29 +437,34 @@ internal class CsBasedCoroutineScheduler(
                 return false
             }
 
-            return true
+            return pendingBlockingAdjustment == PendingBlockingAdjustment.None
         }
     }
 
     private fun maybeAddWorker() {
         schedDebug("[$schedulerName] maybeAddWorker()")
         val toCreate: Int
+        val toRelease: Int
 
         synchronized(this) {
             if (counts.numProcessingWork >= counts.numThreadsGoal) {
                 return
             }
 
-            val newNumProcessingWork = counts.numProcessingWork + 1
+            val newNumProcessingWork = max(counts.numProcessingWork + 1, targetThreadsForBlockingAdjustment)
             val newNumExistingThreads = max(counts.numExistingThreads, newNumProcessingWork)
+            toRelease = newNumProcessingWork - counts.numProcessingWork
             toCreate = newNumExistingThreads - counts.numExistingThreads
             counts.numExistingThreads = newNumExistingThreads
             counts.numProcessingWork = newNumProcessingWork
         }
 
+        semaphore.release(toRelease)
+
         repeat(toCreate) {
-            if (tryUnpark()) return
-            createWorker()
+            if (!tryUnpark()) {
+                createWorker()
+            }
         }
     }
 
@@ -529,7 +562,7 @@ internal class CsBasedCoroutineScheduler(
                 val targetThreadsGoalWithoutDelay = min(targetThreadsGoal, maxThreadsGoalWithoutDelay)
                 val newNumThreadsGoal = if (numThreadsGoal < targetThreadsGoalWithoutDelay) {
                     targetThreadsGoalWithoutDelay
-                } else if(previousDelayElapsed) {
+                } else if (previousDelayElapsed) {
                     numThreadsGoal + 1
                 } else {
                     break
@@ -589,6 +622,12 @@ internal class CsBasedCoroutineScheduler(
 
                 pendingBlockingAdjustment = PendingBlockingAdjustment.WithDelayIfNecessary
             }
+
+//            System.err.println("New blocking task, total: $numBlockingTasks, total in queue ${workQueue.workItems.size}\n" +
+//                "Running Threads: ${counts.numProcessingWork}\n" +
+//                "Existing Threads: ${counts.numExistingThreads}\n" +
+//                "Goal Threads: ${counts.numThreadsGoal}\n" +
+//                "Will wake up GateThread: $shouldWakeGateThread")
         }
 
         if (shouldWakeGateThread) {
