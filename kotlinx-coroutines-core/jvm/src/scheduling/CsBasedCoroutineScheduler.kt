@@ -293,9 +293,9 @@ internal class CsBasedCoroutineScheduler(
         schedDebug("[$schedulerName] dispatch()")
         trackTask()
         val task = createTask(block, taskContext)
-        if (task.mode == TASK_PROBABLY_BLOCKING) {
-            notifyThreadBlocked()
-        }
+//        if (task.mode == TASK_PROBABLY_BLOCKING) {
+//            notifyThreadBlocked()
+//        }
         workQueue.enqueue(task, true)
     }
 
@@ -555,7 +555,7 @@ internal class CsBasedCoroutineScheduler(
             }
 
             // TODO - decide corePoolSize or MIN_THREADS
-            val configuredMaxThreadsWithoutDelay = min(corePoolSize + threadsToAddWithoutDelay, MAX_THREADS)
+            val configuredMaxThreadsWithoutDelay = min(MIN_THREADS + threadsToAddWithoutDelay, MAX_THREADS)
 
             do {
                 val maxThreadsGoalWithoutDelay = max(configuredMaxThreadsWithoutDelay, min(counts.numExistingThreads, MAX_THREADS))
@@ -654,12 +654,12 @@ internal class CsBasedCoroutineScheduler(
         }
     }
 
-//    fun beforeTask(taskMode: Int) {
+    fun beforeTask(taskMode: Int) {
 //        TODO - check if better to increment earlier or now (during dispatch())
-//        if (taskMode == TASK_PROBABLY_BLOCKING) {
-//            notifyThreadBlocked()
-//        }
-//    }
+        if (taskMode == TASK_PROBABLY_BLOCKING) {
+            notifyThreadBlocked()
+        }
+    }
 
     fun afterTask(taskMode: Int) {
         if (taskMode == TASK_PROBABLY_BLOCKING) {
