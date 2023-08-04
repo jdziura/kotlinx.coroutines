@@ -15,11 +15,12 @@ import java.util.concurrent.atomic.*
 import java.util.concurrent.locks.*
 import java.util.concurrent.locks.LockSupport.*
 import kotlin.concurrent.*
+import kotlin.jvm.internal.*
 import kotlin.random.*
 import kotlin.math.*
 import kotlin.random.Random
 
-internal const val SCHED_DEBUG = true
+internal const val SCHED_DEBUG = false
 internal fun schedDebug(msg: String) {
     if (SCHED_DEBUG)
         System.err.println(msg)
@@ -81,7 +82,6 @@ internal class CsBasedCoroutineScheduler(
     private val hillClimber = HillClimbing(corePoolSize, maxPoolSize)
     private var nextCompletedWorkRequestsTime = 0L
     private var priorCompletedWorkRequestTime = 0L
-    private var nextThreadId = atomic(1)
 
     private val _isTerminated = atomic(false)
     val isTerminated: Boolean get() = _isTerminated.value
@@ -97,6 +97,10 @@ internal class CsBasedCoroutineScheduler(
 
     private var numBlockingTasks = 0
     private var numThreadsAddedDueToBlocking = 0
+    private var createdWorkers = 0
+
+    @JvmField
+    val workers = ResizableAtomicArray<CsBasedCoroutineScheduler.Worker>((corePoolSize + 1) * 2)
 
     @JvmField
     val globalQueue = GlobalQueue()
@@ -129,10 +133,19 @@ internal class CsBasedCoroutineScheduler(
         WithDelayIfNecessary
     }
 
-    internal inner class Worker : Thread() {
+    internal inner class Worker private constructor() : Thread() {
         init {
             isDaemon = true
-            name = "$schedulerName-worker-${nextThreadId.getAndIncrement()}"
+        }
+
+        var indexInArray = 0
+            set(index) {
+                name = "$schedulerName-worker-${if (index == 0) "TERMINATED" else index.toString()}"
+                field = index
+            }
+
+        constructor(index: Int): this() {
+            indexInArray = index
         }
 
         val inStack = atomic(false)
@@ -147,6 +160,8 @@ internal class CsBasedCoroutineScheduler(
         var mayHaveLocalTasks = false
 
         private var rngState = Random.nextInt()
+
+        private val stolenTask: Ref.ObjectRef<Task?> = Ref.ObjectRef()
 
         inline val scheduler get() = this@CsBasedCoroutineScheduler
 
@@ -285,9 +300,29 @@ internal class CsBasedCoroutineScheduler(
             return trySteal(STEAL_ANY)
         }
 
-        // TODO - implement
         private fun trySteal(stealingMode: StealingMode): Task? {
-            require(stealingMode == STEAL_ANY)
+            val created: Int
+            synchronized(scheduler) { created = createdWorkers }
+
+            if (created < 2) {
+                return null
+            }
+
+            var currentIndex = nextInt(created)
+            repeat(created) {
+                ++currentIndex
+                if (currentIndex > created) currentIndex = 1
+                val worker = workers[currentIndex]
+                if (worker !== null && worker !== this) {
+                    val stealResult = worker.localQueue.trySteal(stealingMode, stolenTask)
+                    if (stealResult == TASK_STOLEN) {
+                        val result = stolenTask.element
+                        stolenTask.element = null
+                        return result
+                    }
+                }
+            }
+
             return null
         }
     }
@@ -451,7 +486,6 @@ internal class CsBasedCoroutineScheduler(
         if (this == null) return task
         if (task.isBlocking) return task
         if (isTerminated) return task
-        if (!task.isBlocking) return task
         mayHaveLocalTasks = true
         return localQueue.add(task, fair = tailDispatch)
     }
@@ -596,7 +630,15 @@ internal class CsBasedCoroutineScheduler(
     }
 
     private fun createWorker() {
-        val worker = Worker()
+        val worker: Worker
+        synchronized(this) {
+            if (isTerminated) return
+            val newIndex = createdWorkers + 1
+            require(newIndex > 0 && workers[newIndex] == null)
+            worker = Worker(newIndex)
+            workers.setSynchronized(newIndex, worker)
+            createdWorkers++
+        }
         worker.start()
     }
 
@@ -754,7 +796,7 @@ internal class CsBasedCoroutineScheduler(
 //                "Running Threads: ${counts.numProcessingWork}\n" +
 //                "Existing Threads: ${counts.numExistingThreads}\n" +
 //                "Goal Threads: ${counts.numThreadsGoal}\n" +
-//                "Will wake up GateThread: $shouldWakeGateThread")
+//                "Will wake up GateThread: $shouldWakeGateThread\n")
         }
 
         if (shouldWakeGateThread) {
