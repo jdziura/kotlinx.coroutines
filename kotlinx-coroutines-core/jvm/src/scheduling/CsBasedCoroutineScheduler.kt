@@ -60,11 +60,13 @@ internal class CsBasedCoroutineScheduler(
         private const val GATE_ACTIVITIES_PERIOD_MS = DelayHelper.GATE_ACTIVITIES_PERIOD_MS
         private const val DELAY_STEP_MS = 25L
         private const val MAX_DELAY_MS = 250L
-        private const val MAX_THREADS = CoroutineScheduler.MAX_SUPPORTED_POOL_SIZE
+//        private const val MAX_THREADS = CoroutineScheduler.MAX_SUPPORTED_POOL_SIZE
         private const val MIN_THREADS = CoroutineScheduler.MIN_SUPPORTED_POOL_SIZE
         private const val THREAD_TIMEOUT_MS = 20 * 1000L
         private const val DISPATCH_QUANTUM_MS = 30L
     }
+
+    private val MAX_THREADS = maxPoolSize
 
     private val numProcessors = Runtime.getRuntime().availableProcessors()
     private val threadsToAddWithoutDelay = numProcessors
@@ -595,7 +597,13 @@ internal class CsBasedCoroutineScheduler(
                 return
             }
 
-            val newNumProcessingWork = max(counts.numProcessingWork + 1, targetThreadsForBlockingAdjustment)
+            val newNumProcessingWork = if (numBlockingTasks > 0) {
+                max(counts.numProcessingWork + 1, targetThreadsForBlockingAdjustment)
+            } else {
+                counts.numProcessingWork + 1
+            }
+//            val newNumProcessingWork = max(counts.numProcessingWork + 1, targetThreadsForBlockingAdjustment)
+
             val newNumExistingThreads = max(counts.numExistingThreads, newNumProcessingWork)
             toRelease = newNumProcessingWork - counts.numProcessingWork
             toCreate = newNumExistingThreads - counts.numExistingThreads
