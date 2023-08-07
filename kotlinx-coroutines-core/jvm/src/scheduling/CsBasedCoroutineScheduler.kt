@@ -113,8 +113,6 @@ internal class CsBasedCoroutineScheduler(
         }
 
     private val targetThreadsForBlockingAdjustment: Int
-        // TODO - verify synchronization (this should be used only with lock taken)
-        // TODO - decide if should use corePoolSize or MIN_THREADS
         get() {
             return if (numBlockingTasks <= 0) {
                 corePoolSize
@@ -123,9 +121,7 @@ internal class CsBasedCoroutineScheduler(
             }
         }
 
-    // TODO - verify synchronization
     private var pendingBlockingAdjustment = PendingBlockingAdjustment.None
-
 
     private enum class PendingBlockingAdjustment {
         None,
@@ -152,12 +148,6 @@ internal class CsBasedCoroutineScheduler(
 
         @JvmField
         val localQueue: WorkQueue = WorkQueue()
-
-        @JvmField
-        var state = WorkerState.DORMANT
-
-        @JvmField
-        var mayHaveLocalTasks = false
 
         private var rngState = Random.nextInt()
 
@@ -210,6 +200,18 @@ internal class CsBasedCoroutineScheduler(
             }
         }
 
+        private fun dequeue(globalFirst: Boolean = false): Task? {
+            if (globalFirst) pollGlobalQueues()?.let { return it }
+            localQueue.poll()?.let { return it }
+            if (!globalFirst) pollGlobalQueues()?.let { return it }
+
+            val (task, missedSteal) = trySteal(STEAL_ANY)
+            if (missedSteal) {
+                ensureThreadRequested()
+            }
+            return task
+        }
+
         private fun shouldExitWorker(): Boolean {
             synchronized(this@CsBasedCoroutineScheduler) {
                 if (counts.numExistingThreads <= counts.numProcessingWork) {
@@ -255,21 +257,16 @@ internal class CsBasedCoroutineScheduler(
         private fun dispatchFromQueue(): Boolean {
             markThreadRequestSatisifed()
 
-            // TODO - check if it is required here.
-            // for now removed, creates excess threads
-//        ensureThreadRequested()
-
+            var workItem: Task? = dequeue(globalFirst = true) ?: return true
             var startTickCount = System.currentTimeMillis()
 
             while (true) {
-                val workItem = findTask(mayHaveLocalTasks)
-
                 if (workItem == null) {
-                    mayHaveLocalTasks = false
-                    return true
+                    workItem = dequeue() ?: return true
                 }
 
                 executeWorkItem(workItem)
+                workItem = null
 
                 val currentTickCount = System.currentTimeMillis()
                 if (!notifyWorkItemComplete(currentTickCount)) {
@@ -288,26 +285,16 @@ internal class CsBasedCoroutineScheduler(
             return globalQueue.removeFirstOrNull()
         }
 
-        private fun findTask(scanLocalQueue: Boolean): Task? {
-            if (scanLocalQueue) {
-                val globalFirst = nextInt(2 * corePoolSize) == 0
-                if (globalFirst) pollGlobalQueues()?.let { return it }
-                localQueue.poll()?.let { return it }
-                if (!globalFirst) pollGlobalQueues()?.let { return it }
-            } else {
-                pollGlobalQueues()?.let { return it }
-            }
-            return trySteal(STEAL_ANY)
-        }
-
-        private fun trySteal(stealingMode: StealingMode): Task? {
+        // TODO - rewrite to not use pair, and use better check for missedSteal
+        private fun trySteal(stealingMode: StealingMode): Pair<Task?, Boolean> {
             val created: Int
             synchronized(scheduler) { created = createdWorkers }
 
             if (created < 2) {
-                return null
+                return (null to false)
             }
 
+            var missedSteal = false
             var currentIndex = nextInt(created)
             repeat(created) {
                 ++currentIndex
@@ -318,12 +305,14 @@ internal class CsBasedCoroutineScheduler(
                     if (stealResult == TASK_STOLEN) {
                         val result = stolenTask.element
                         stolenTask.element = null
-                        return result
+                        return (result to false)
+                    } else if (worker.localQueue.size > 0) {
+                        missedSteal = true
                     }
                 }
             }
 
-            return null
+            return (null to missedSteal)
         }
     }
 
@@ -453,11 +442,6 @@ internal class CsBasedCoroutineScheduler(
                 worker.join(timeout)
             }
         }
-
-//        while (true) {
-//            val task = dequeue() ?: break
-//            runSafely(task)
-//        }
     }
 
     private fun enqueue(task: Task, tailDispatch: Boolean) {
@@ -486,7 +470,6 @@ internal class CsBasedCoroutineScheduler(
         if (this == null) return task
         if (task.isBlocking) return task
         if (isTerminated) return task
-        mayHaveLocalTasks = true
         return localQueue.add(task, fair = tailDispatch)
     }
 
@@ -834,32 +817,5 @@ internal class CsBasedCoroutineScheduler(
         if (taskMode == TASK_PROBABLY_BLOCKING) {
             notifyThreadUnblocked()
         }
-    }
-
-    enum class WorkerState {
-        /**
-         * Has CPU token and either executes [TASK_NON_BLOCKING] task or tries to find one.
-         */
-        CPU_ACQUIRED,
-
-        /**
-         * Executing task with [TASK_PROBABLY_BLOCKING].
-         */
-        BLOCKING,
-
-        /**
-         * Currently parked.
-         */
-        PARKING,
-
-        /**
-         * Tries to execute its local work and then goes to infinite sleep as no longer needed worker.
-         */
-        DORMANT,
-
-        /**
-         * Terminal state, will no longer be used
-         */
-        TERMINATED
     }
 }
