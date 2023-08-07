@@ -21,7 +21,6 @@ class BlockingCoroutineDispatcherMixedStealingStressTest : SchedulerTestBase() {
     }
 
     @Test
-    @Ignore
     fun testBlockingProgressPreventedInternal()  {
         val blocking = blockingDispatcher(corePoolSize).asExecutor()
         val regular = dispatcher.asExecutor()
@@ -50,7 +49,6 @@ class BlockingCoroutineDispatcherMixedStealingStressTest : SchedulerTestBase() {
     }
 
     @Test
-    @Ignore
     fun testBlockingProgressPreventedExternal()  {
         val blocking = blockingDispatcher(corePoolSize).asExecutor()
         val regular = dispatcher.asExecutor()

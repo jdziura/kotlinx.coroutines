@@ -16,7 +16,6 @@ class DefaultDispatchersTest : TestBase() {
     private /*const*/ val EXPECTED_PARALLELISM = 64
 
     @Test(timeout = 10_000L)
-    @Ignore
     fun testLimitedParallelismIsSeparatedFromDefaultIo() = runTest {
         val barrier = CyclicBarrier(EXPECTED_PARALLELISM + 1)
         val ioBlocker = CountDownLatch(1)
@@ -40,7 +39,6 @@ class DefaultDispatchersTest : TestBase() {
     }
 
     @Test(timeout = 10_000L)
-    @Ignore
     fun testDefaultDispatcherIsSeparateFromIO() = runTest {
         val ioBarrier = CyclicBarrier(EXPECTED_PARALLELISM + 1)
         val ioBlocker = CountDownLatch(1)
@@ -64,7 +62,6 @@ class DefaultDispatchersTest : TestBase() {
     }
 
     @Test
-    @Ignore
     fun testHardCapOnParallelism() = runTest {
         val iterations = 100_000 * stressTestMultiplierSqrt
         val concurrency = AtomicInteger()
