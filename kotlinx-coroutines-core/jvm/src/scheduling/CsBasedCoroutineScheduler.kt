@@ -81,6 +81,8 @@ internal class CsBasedCoroutineScheduler(
     private val _isTerminated = atomic(false)
     private val hasOutstandingThreadRequest = atomic(0)
     private val gateThreadRunningState = atomic(0)
+    private val completionCount = atomic(0)
+    private val numBlockingTasks = atomic(0)
     private val lastDequeueTime = atomic(0L)
     private val runGateThreadEvent = AutoResetEvent(true)
     private val delayEvent = AutoResetEvent(false)
@@ -91,16 +93,15 @@ internal class CsBasedCoroutineScheduler(
     // TODO - decide if lower bound is corePoolSize or 1
     private val hillClimber = HillClimbing(corePoolSize, maxPoolSize)
 
+    @Volatile private var nextCompletedWorkRequestsTime = 0L
+    @Volatile private var priorCompletedWorkRequestTime = 0L
+    @Volatile private var pendingBlockingAdjustment = PendingBlockingAdjustment.None
+
     private var currentSampleStartTime = 0L
     private var threadAdjustmentIntervalMs = 0
-    private var completionCount = 0
     private var priorCompletionCount = 0
-    @Volatile private var nextCompletedWorkRequestsTime = 0L
-    private var priorCompletedWorkRequestTime = 0L
-    private var numBlockingTasks = 0
     private var numThreadsAddedDueToBlocking = 0
     private var createdWorkers = 0
-    private var pendingBlockingAdjustment = PendingBlockingAdjustment.None
 
     @JvmField
     val workers = ResizableAtomicArray<CsBasedCoroutineScheduler.Worker>((corePoolSize + 1) * 2)
@@ -117,10 +118,11 @@ internal class CsBasedCoroutineScheduler(
 
     private val targetThreadsForBlockingAdjustment: Int
         get() {
-            return if (numBlockingTasks <= 0) {
+            val numBlocking: Int = numBlockingTasks.value
+            return if (numBlocking <= 0) {
                 corePoolSize
             } else {
-                min(corePoolSize + numBlockingTasks, maxPoolSize)
+                min(corePoolSize + numBlocking, maxPoolSize)
             }
         }
 
@@ -294,6 +296,7 @@ internal class CsBasedCoroutineScheduler(
     }
 
     private fun notifyWorkItemProgress(currentTimeMs: Long) {
+        completionCount.incrementAndGet()
         lastDequeueTime.getAndSet(currentTimeMs)
         if (shouldAdjustMaxWorkersActive(currentTimeMs)) {
             adjustMaxWorkersActive()
@@ -302,43 +305,41 @@ internal class CsBasedCoroutineScheduler(
 
     private fun adjustMaxWorkersActive() {
         var addWorker = false
-        synchronized(this) {
-            if (!threadAdjustmentLock.tryLock()) {
+        if (!threadAdjustmentLock.tryLock()) {
+            return
+        }
+        try {
+            val counts = threadCounts.get()
+
+            if (getNumProcessingWork(counts) > getNumThreadsGoal(counts) ||
+                pendingBlockingAdjustment != PendingBlockingAdjustment.None) {
                 return
             }
-            try {
-                val counts = threadCounts.get()
 
-                if (getNumProcessingWork(counts) > getNumThreadsGoal(counts) ||
-                    pendingBlockingAdjustment != PendingBlockingAdjustment.None) {
-                    return
-                }
+            val currentTicks = System.currentTimeMillis()
+            val elapsedMs = currentTicks - currentSampleStartTime
 
-                val currentTicks = System.currentTimeMillis()
-                val elapsedMs = currentTicks - currentSampleStartTime
+            if (elapsedMs >= threadAdjustmentIntervalMs / 2) {
+                val numCompletions = completionCount.value - priorCompletionCount
+                val oldNumThreadsGoal = getNumThreadsGoal(counts)
+                val updateResult = hillClimber.update(oldNumThreadsGoal, elapsedMs / 1000.0, numCompletions)
+                val newNumThreadsGoal = updateResult.first
+                threadAdjustmentIntervalMs = updateResult.second
 
-                if (elapsedMs >= threadAdjustmentIntervalMs / 2) {
-                    val numCompletions = completionCount - priorCompletionCount
-                    val oldNumThreadsGoal = getNumThreadsGoal(counts)
-                    val updateResult = hillClimber.update(oldNumThreadsGoal, elapsedMs / 1000.0, numCompletions)
-                    val newNumThreadsGoal = updateResult.first
-                    threadAdjustmentIntervalMs = updateResult.second
-
-                    if (oldNumThreadsGoal != newNumThreadsGoal) {
-                        interlockedSetNumThreadsGoal(newNumThreadsGoal)
-                        if (newNumThreadsGoal > oldNumThreadsGoal) {
-                            addWorker = true
-                        }
+                if (oldNumThreadsGoal != newNumThreadsGoal) {
+                    interlockedSetNumThreadsGoal(newNumThreadsGoal)
+                    if (newNumThreadsGoal > oldNumThreadsGoal) {
+                        addWorker = true
                     }
-
-                    priorCompletionCount = numCompletions
-                    nextCompletedWorkRequestsTime = currentTicks + threadAdjustmentIntervalMs
-                    priorCompletedWorkRequestTime = currentTicks
-                    currentSampleStartTime = currentTicks
                 }
-            } finally {
-                threadAdjustmentLock.unlock()
+
+                priorCompletionCount = numCompletions
+                nextCompletedWorkRequestsTime = currentTicks + threadAdjustmentIntervalMs
+                priorCompletedWorkRequestTime = currentTicks
+                currentSampleStartTime = currentTicks
             }
+        } finally {
+            threadAdjustmentLock.unlock()
         }
         if (addWorker) {
             maybeAddWorker()
@@ -346,45 +347,41 @@ internal class CsBasedCoroutineScheduler(
     }
 
     private fun shouldStopProcessingWorkNow(): Boolean {
-        synchronized(this) {
-            var counts = threadCounts.get()
-            while (true) {
-                if (getNumProcessingWork(counts) <= getNumThreadsGoal(counts)) {
-                    return false
-                }
-
-                val newCounts = decrementNumProcessingWork(counts)
-                val oldCounts = threadCounts.compareAndExchange(counts, newCounts)
-
-                if (oldCounts == counts) {
-                    return true
-                }
-
-                counts = oldCounts
-                // TODO - remove this, doesn't compile with above line without it for some reason
-                require(counts == oldCounts)
+        var counts = threadCounts.get()
+        while (true) {
+            if (getNumProcessingWork(counts) <= getNumThreadsGoal(counts)) {
+                return false
             }
+
+            val newCounts = decrementNumProcessingWork(counts)
+            val oldCounts = threadCounts.compareAndExchange(counts, newCounts)
+
+            if (oldCounts == counts) {
+                return true
+            }
+
+            counts = oldCounts
+            // TODO - remove this, doesn't compile with above line without it for some reason
+            require(counts == oldCounts)
         }
     }
 
     private fun shouldAdjustMaxWorkersActive(currentTimeMs: Long): Boolean {
-        synchronized(this) {
-            val priorTime = priorCompletedWorkRequestTime
-            val requiredInterval = nextCompletedWorkRequestsTime - priorTime
-            val elapsedInterval = currentTimeMs - priorTime
+        val priorTime = priorCompletedWorkRequestTime
+        val requiredInterval = nextCompletedWorkRequestsTime - priorTime
+        val elapsedInterval = currentTimeMs - priorTime
 
-            if (elapsedInterval < requiredInterval) {
-                return false
-            }
-
-            val counts = threadCounts.get()
-
-            if (getNumProcessingWork(counts) > getNumThreadsGoal(counts)) {
-                return false
-            }
-
-            return pendingBlockingAdjustment == PendingBlockingAdjustment.None
+        if (elapsedInterval < requiredInterval) {
+            return false
         }
+
+        val counts = threadCounts.get()
+
+        if (getNumProcessingWork(counts) > getNumThreadsGoal(counts)) {
+            return false
+        }
+
+        return pendingBlockingAdjustment == PendingBlockingAdjustment.None
     }
 
     private fun maybeAddWorker() {
@@ -397,40 +394,38 @@ internal class CsBasedCoroutineScheduler(
         var newNumExistingThreads: Int
         var newNumProcessingWork: Int
 
-        synchronized(this) {
-            while (true) {
-                numProcessingWork = getNumProcessingWork(counts)
-                if (numProcessingWork >= getNumThreadsGoal(counts)) {
-                    return
-                }
-
-                newNumProcessingWork = numProcessingWork + 1
-
-                if (numBlockingTasks > 0) {
-                    newNumProcessingWork = max(newNumProcessingWork, targetThreadsForBlockingAdjustment)
-                }
-
-                numExistingThreads = getNumExistingThreads(counts)
-                newNumExistingThreads = max(numExistingThreads, newNumProcessingWork)
-
-                // TODO - decide if it's desired
-                if (newNumExistingThreads == numExistingThreads && newNumExistingThreads < corePoolSize) {
-                    newNumExistingThreads++
-                }
-
-                var newCounts = counts
-
-                newCounts = updateNumProcessingWork(newCounts, newNumProcessingWork)
-                newCounts = updateNumExistingThreads(newCounts, newNumExistingThreads)
-
-                val oldCounts = threadCounts.compareAndExchange(counts, newCounts)
-
-                if (oldCounts == counts) {
-                    break
-                }
-
-                counts = oldCounts
+        while (true) {
+            numProcessingWork = getNumProcessingWork(counts)
+            if (numProcessingWork >= getNumThreadsGoal(counts)) {
+                return
             }
+
+            newNumProcessingWork = numProcessingWork + 1
+
+            if (numBlockingTasks.value > 0) {
+                newNumProcessingWork = max(newNumProcessingWork, targetThreadsForBlockingAdjustment)
+            }
+
+            numExistingThreads = getNumExistingThreads(counts)
+            newNumExistingThreads = max(numExistingThreads, newNumProcessingWork)
+
+            // TODO - decide if it's desired
+            if (newNumExistingThreads == numExistingThreads && newNumExistingThreads < corePoolSize) {
+                newNumExistingThreads++
+            }
+
+            var newCounts = counts
+
+            newCounts = updateNumProcessingWork(newCounts, newNumProcessingWork)
+            newCounts = updateNumExistingThreads(newCounts, newNumExistingThreads)
+
+            val oldCounts = threadCounts.compareAndExchange(counts, newCounts)
+
+            if (oldCounts == counts) {
+                break
+            }
+
+            counts = oldCounts
         }
 
         val toCreate = newNumExistingThreads - numExistingThreads
@@ -449,7 +444,7 @@ internal class CsBasedCoroutineScheduler(
 
     private fun createWorker() {
         val worker: Worker
-        synchronized(this) {
+        synchronized(workers) {
             if (isTerminated) return
             val newIndex = createdWorkers + 1
             require(newIndex > 0 && workers[newIndex] == null)
@@ -461,16 +456,14 @@ internal class CsBasedCoroutineScheduler(
     }
 
     private fun removeWorkingWorker() {
-        synchronized(this) {
-            var counts = threadCounts.get()
-            while (true) {
-                val newCounts = decrementNumProcessingWork(counts)
-                val countsBeforeUpdate = threadCounts.compareAndExchange(counts, newCounts)
-                if (countsBeforeUpdate == counts) {
-                    break
-                }
-                counts = countsBeforeUpdate
+        var counts = threadCounts.get()
+        while (true) {
+            val newCounts = decrementNumProcessingWork(counts)
+            val countsBeforeUpdate = threadCounts.compareAndExchange(counts, newCounts)
+            if (countsBeforeUpdate == counts) {
+                break
             }
+            counts = countsBeforeUpdate
         }
 
         if (numRequestedWorkers.value > 0) {
@@ -517,14 +510,12 @@ internal class CsBasedCoroutineScheduler(
         // Compiler doesn't like val inside withLock
         var result = (0L to false)
 
-        synchronized(this) {
-            lockDebug("${Thread.currentThread().name} 3.1")
-            threadAdjustmentLock.withLock {
-                lockDebug("${Thread.currentThread().name} 3.2")
-                result = performBlockingAdjustmentSync(previousDelayElapsed)
-            }
-            lockDebug("${Thread.currentThread().name} 3.3")
+        lockDebug("${Thread.currentThread().name} 3.1")
+        threadAdjustmentLock.withLock {
+            lockDebug("${Thread.currentThread().name} 3.2")
+            result = performBlockingAdjustmentSync(previousDelayElapsed)
         }
+        lockDebug("${Thread.currentThread().name} 3.3")
 
         val nextDelayMs = result.first
         val addWorker = result.second
@@ -614,25 +605,23 @@ internal class CsBasedCoroutineScheduler(
 
     private fun notifyThreadBlocked() {
         var shouldWakeGateThread = false
-        synchronized(this) {
-            lockDebug("${Thread.currentThread().name} 4.1")
-            threadAdjustmentLock.withLock {
-                lockDebug("${Thread.currentThread().name} 4.2")
-                numBlockingTasks++
-                require(numBlockingTasks > 0)
+        numBlockingTasks.incrementAndGet()
+        lockDebug("${Thread.currentThread().name} 4.1")
+        threadAdjustmentLock.withLock {
+            lockDebug("${Thread.currentThread().name} 4.2")
+            require(numBlockingTasks.value > 0)
 
-                if (pendingBlockingAdjustment != PendingBlockingAdjustment.WithDelayIfNecessary &&
-                    getNumThreadsGoal() < targetThreadsForBlockingAdjustment) {
+            if (pendingBlockingAdjustment != PendingBlockingAdjustment.WithDelayIfNecessary &&
+                getNumThreadsGoal() < targetThreadsForBlockingAdjustment) {
 
-                    if (pendingBlockingAdjustment == PendingBlockingAdjustment.None) {
-                        shouldWakeGateThread = true
-                    }
-
-                    pendingBlockingAdjustment = PendingBlockingAdjustment.WithDelayIfNecessary
+                if (pendingBlockingAdjustment == PendingBlockingAdjustment.None) {
+                    shouldWakeGateThread = true
                 }
+
+                pendingBlockingAdjustment = PendingBlockingAdjustment.WithDelayIfNecessary
             }
-            lockDebug("${Thread.currentThread().name} 4.3")
         }
+        lockDebug("${Thread.currentThread().name} 4.3")
 
         if (shouldWakeGateThread) {
             wakeGateThread()
@@ -641,21 +630,19 @@ internal class CsBasedCoroutineScheduler(
 
     private fun notifyThreadUnblocked() {
         var shouldWakeGateThread = false
-        synchronized(this) {
-            lockDebug("${Thread.currentThread().name} 5.1")
-            threadAdjustmentLock.withLock {
-                lockDebug("${Thread.currentThread().name} 5.2")
-                numBlockingTasks--
-                if (pendingBlockingAdjustment != PendingBlockingAdjustment.Immediately &&
-                    numThreadsAddedDueToBlocking > 0 &&
-                    getNumThreadsGoal() > targetThreadsForBlockingAdjustment) {
+        numBlockingTasks.decrementAndGet()
+        lockDebug("${Thread.currentThread().name} 5.1")
+        threadAdjustmentLock.withLock {
+            lockDebug("${Thread.currentThread().name} 5.2")
+            if (pendingBlockingAdjustment != PendingBlockingAdjustment.Immediately &&
+                numThreadsAddedDueToBlocking > 0 &&
+                getNumThreadsGoal() > targetThreadsForBlockingAdjustment) {
 
-                    shouldWakeGateThread = true
-                    pendingBlockingAdjustment = PendingBlockingAdjustment.Immediately
-                }
+                shouldWakeGateThread = true
+                pendingBlockingAdjustment = PendingBlockingAdjustment.Immediately
             }
-            lockDebug("${Thread.currentThread().name} 5.3")
         }
+        lockDebug("${Thread.currentThread().name} 5.3")
 
         if (shouldWakeGateThread) {
             wakeGateThread()
@@ -757,34 +744,32 @@ internal class CsBasedCoroutineScheduler(
         }
 
         private fun shouldExitWorker(): Boolean {
-            synchronized(this@CsBasedCoroutineScheduler) {
-                lockDebug("${Thread.currentThread().name} 1.1")
-                threadAdjustmentLock.withLock {
-                    lockDebug("${Thread.currentThread().name} 1.2")
-                    var counts = threadCounts.get()
-                    while (true) {
-                        if (getNumExistingThreads(counts) <= getNumProcessingWork(counts)) {
-                            lockDebug("${Thread.currentThread().name} 1.3")
-                            return false
-                        }
-
-                        var newCounts = decrementNumExistingThreads(counts)
-                        val newNumExistingThreads = getNumExistingThreads(newCounts)
-                        val newNumThreadsGoal = max(minThreadsGoal, min(newNumExistingThreads, getNumThreadsGoal(counts)))
-
-                        newCounts = updateNumThreadsGoal(newCounts, newNumThreadsGoal)
-                        val oldCounts = threadCounts.compareAndExchange(counts, newCounts)
-
-                        if (oldCounts == counts) {
-                            hillClimber.forceChange(newNumThreadsGoal, HillClimbing.StateOrTransition.ThreadTimedOut)
-                            lockDebug("${Thread.currentThread().name} 1.3")
-                            return true
-                        }
-
-                        counts = oldCounts
-                        // TODO - delete, again wouldn't compile
-                        require(counts == oldCounts)
+            lockDebug("${Thread.currentThread().name} 1.1")
+            threadAdjustmentLock.withLock {
+                lockDebug("${Thread.currentThread().name} 1.2")
+                var counts = threadCounts.get()
+                while (true) {
+                    if (getNumExistingThreads(counts) <= getNumProcessingWork(counts)) {
+                        lockDebug("${Thread.currentThread().name} 1.3")
+                        return false
                     }
+
+                    var newCounts = decrementNumExistingThreads(counts)
+                    val newNumExistingThreads = getNumExistingThreads(newCounts)
+                    val newNumThreadsGoal = max(minThreadsGoal, min(newNumExistingThreads, getNumThreadsGoal(counts)))
+
+                    newCounts = updateNumThreadsGoal(newCounts, newNumThreadsGoal)
+                    val oldCounts = threadCounts.compareAndExchange(counts, newCounts)
+
+                    if (oldCounts == counts) {
+                        hillClimber.forceChange(newNumThreadsGoal, HillClimbing.StateOrTransition.ThreadTimedOut)
+                        lockDebug("${Thread.currentThread().name} 1.3")
+                        return true
+                    }
+
+                    counts = oldCounts
+                    // TODO - delete, again wouldn't compile
+                    require(counts == oldCounts)
                 }
             }
 
@@ -855,7 +840,7 @@ internal class CsBasedCoroutineScheduler(
         // TODO - maybe rewrite
         private fun trySteal(stealingMode: StealingMode): Pair<Task?, Boolean> {
             val created: Int
-            synchronized(scheduler) { created = createdWorkers }
+            synchronized(workers) { created = createdWorkers }
 
             if (created < 2) {
                 return (null to false)
@@ -938,29 +923,27 @@ internal class CsBasedCoroutineScheduler(
                         sufficientDelaySinceLastDequeue()) {
 
                         var addWorker = false
-                        synchronized(this@CsBasedCoroutineScheduler) {
-                            lockDebug("${Thread.currentThread().name} 2.1")
-                            threadAdjustmentLock.withLock {
-                                lockDebug("${Thread.currentThread().name} 2.2")
-                                var counts = threadCounts.get()
-                                while (getNumProcessingWork(counts) < maxPoolSize
-                                    && getNumProcessingWork(counts) >= getNumThreadsGoal(counts)) {
+                        lockDebug("${Thread.currentThread().name} 2.1")
+                        threadAdjustmentLock.withLock {
+                            lockDebug("${Thread.currentThread().name} 2.2")
+                            var counts = threadCounts.get()
+                            while (getNumProcessingWork(counts) < maxPoolSize
+                                && getNumProcessingWork(counts) >= getNumThreadsGoal(counts)) {
 
-                                    val newNumThreadsGoal = getNumProcessingWork(counts) + 1
-                                    val newCounts = updateNumThreadsGoal(counts, newNumThreadsGoal)
+                                val newNumThreadsGoal = getNumProcessingWork(counts) + 1
+                                val newCounts = updateNumThreadsGoal(counts, newNumThreadsGoal)
 
-                                    val countsBeforeUpdate = threadCounts.compareAndExchange(counts, newCounts)
-                                    if (countsBeforeUpdate == counts) {
-                                        hillClimber.forceChange(newNumThreadsGoal, HillClimbing.StateOrTransition.Starvation)
-                                        addWorker = true
-                                        break
-                                    }
-
-                                    counts = countsBeforeUpdate
+                                val countsBeforeUpdate = threadCounts.compareAndExchange(counts, newCounts)
+                                if (countsBeforeUpdate == counts) {
+                                    hillClimber.forceChange(newNumThreadsGoal, HillClimbing.StateOrTransition.Starvation)
+                                    addWorker = true
+                                    break
                                 }
+
+                                counts = countsBeforeUpdate
                             }
-                            lockDebug("${Thread.currentThread().name} 2.3")
                         }
+                        lockDebug("${Thread.currentThread().name} 2.3")
 
                         if (addWorker) {
                             maybeAddWorker()
