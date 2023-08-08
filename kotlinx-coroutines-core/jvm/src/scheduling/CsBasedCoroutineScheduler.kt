@@ -53,12 +53,22 @@ internal class CsBasedCoroutineScheduler(
         private const val MIN_THREADS = CoroutineScheduler.MIN_SUPPORTED_POOL_SIZE
         private const val THREAD_TIMEOUT_MS = 20 * 1000L
         private const val DISPATCH_QUANTUM_MS = 30L
+
+        private const val SHIFT_LENGTH = 16
+
+        private const val SHIFT_PROCESSING_WORK =   0
+        private const val SHIFT_EXISTING_THREADS =  SHIFT_LENGTH
+        private const val SHIFT_THREADS_GOAL =      SHIFT_LENGTH * 2
+
+        private const val MASK_PROCESSING_WORK =    (1L shl SHIFT_LENGTH) - 1
+        private const val MASK_EXISTING_THREADS =   MASK_PROCESSING_WORK shl SHIFT_EXISTING_THREADS
+        private const val MASK_THREADS_GOAL =       MASK_PROCESSING_WORK shl SHIFT_THREADS_GOAL
     }
 
     private val numProcessors = Runtime.getRuntime().availableProcessors()
     private val threadsToAddWithoutDelay = numProcessors
     private val threadsPerDelayStep = numProcessors
-    private val counts = ThreadCounts(corePoolSize)
+    private val threadCounts = AtomicLong(updateNumThreadsGoal(0L, corePoolSize))
     private val workerStack = Stack<Worker>()
     private val numRequestedWorkers = atomic(0)
     private val _isTerminated = atomic(false)
@@ -94,7 +104,7 @@ internal class CsBasedCoroutineScheduler(
 
     private val minThreadsGoal: Int
         get() {
-            return min(counts.numThreadsGoal, targetThreadsForBlockingAdjustment)
+            return min(getNumThreadsGoal(threadCounts.get()), targetThreadsForBlockingAdjustment)
         }
 
     private val targetThreadsForBlockingAdjustment: Int
@@ -105,6 +115,27 @@ internal class CsBasedCoroutineScheduler(
                 min(corePoolSize + numBlockingTasks, maxPoolSize)
             }
         }
+
+    private fun getThreadCountsValue(data: Long, mask: Long, shift: Int): Int {
+        return ((data and mask) shr shift).toInt()
+    }
+
+    private fun getThreadCountsUpdatedData(data: Long, value: Int, mask: Long, shift: Int): Long {
+        return (data and mask.inv()) or (value.toLong() shl shift)
+    }
+
+    private fun getNumProcessingWork(data: Long) = getThreadCountsValue(data, MASK_PROCESSING_WORK, SHIFT_PROCESSING_WORK)
+    private fun getNumExistingThreads(data: Long) = getThreadCountsValue(data, MASK_EXISTING_THREADS, SHIFT_EXISTING_THREADS)
+    private fun getNumThreadsGoal(data: Long) = getThreadCountsValue(data, MASK_THREADS_GOAL, SHIFT_THREADS_GOAL)
+
+    // set functions only return updated value, don't change anything in place
+    private fun updateNumProcessingWork(data: Long, value: Int) = getThreadCountsUpdatedData(data, value, MASK_PROCESSING_WORK, SHIFT_PROCESSING_WORK)
+    private fun updateNumExistingThreads(data: Long, value: Int) = getThreadCountsUpdatedData(data, value, MASK_EXISTING_THREADS, SHIFT_EXISTING_THREADS)
+    private fun updateNumThreadsGoal(data: Long, value: Int) = getThreadCountsUpdatedData(data, value, MASK_THREADS_GOAL, SHIFT_THREADS_GOAL)
+
+    private fun decrementNumProcessingWork(data: Long) = data - (1L shl SHIFT_PROCESSING_WORK)
+    private fun decrementNumExistingThreads(data: Long) = data - (1L shl SHIFT_EXISTING_THREADS)
+    private fun decrementNumThreadsGoal(data: Long) = data - (1L shl SHIFT_THREADS_GOAL)
 
     override fun dispatch(block: Runnable, taskContext: TaskContext, tailDispatch: Boolean) {
         schedDebug("[$schedulerName] dispatch()")
@@ -250,7 +281,8 @@ internal class CsBasedCoroutineScheduler(
     private fun adjustMaxWorkersActive() {
         var addWorker = false
         synchronized(this) {
-            if (counts.numProcessingWork > counts.numThreadsGoal ||
+            val counts = threadCounts.get()
+            if (getNumProcessingWork(counts) > getNumThreadsGoal(counts) ||
                 pendingBlockingAdjustment != PendingBlockingAdjustment.None) {
                 return
             }
@@ -260,13 +292,13 @@ internal class CsBasedCoroutineScheduler(
 
             if (elapsedMs >= threadAdjustmentIntervalMs / 2) {
                 val numCompletions = completionCount - priorCompletionCount
-                val oldNumThreadsGoal = counts.numThreadsGoal
+                val oldNumThreadsGoal = getNumThreadsGoal(counts)
                 val updateResult = hillClimber.update(oldNumThreadsGoal, elapsedMs / 1000.0, numCompletions)
                 val newNumThreadsGoal = updateResult.first
                 threadAdjustmentIntervalMs = updateResult.second
 
                 if (oldNumThreadsGoal != newNumThreadsGoal) {
-                    counts.numThreadsGoal = newNumThreadsGoal
+                    threadCounts.set(updateNumThreadsGoal(counts, newNumThreadsGoal))
                     if (newNumThreadsGoal > oldNumThreadsGoal) {
                         addWorker = true
                     }
@@ -285,11 +317,12 @@ internal class CsBasedCoroutineScheduler(
 
     private fun shouldStopProcessingWorkNow(): Boolean {
         synchronized(this) {
-            if (counts.numProcessingWork <= counts.numThreadsGoal) {
+            val counts = threadCounts.get()
+            if (getNumProcessingWork(counts) <= getNumThreadsGoal(counts)) {
                 return false
             }
 
-            counts.numProcessingWork--
+            threadCounts.set(decrementNumProcessingWork(counts))
             return true
         }
     }
@@ -318,25 +351,29 @@ internal class CsBasedCoroutineScheduler(
         val toRelease: Int
 
         synchronized(this) {
-            if (counts.numProcessingWork >= counts.numThreadsGoal) {
+            var counts = threadCounts.get()
+            if (getNumProcessingWork(counts) >= getNumThreadsGoal(counts)) {
                 return
             }
 
             val newNumProcessingWork = if (numBlockingTasks > 0) {
-                max(counts.numProcessingWork + 1, targetThreadsForBlockingAdjustment)
+                max(getNumProcessingWork(counts) + 1, targetThreadsForBlockingAdjustment)
             } else {
-                counts.numProcessingWork + 1
+                getNumProcessingWork(counts) + 1
             }
 
-            var newNumExistingThreads = max(counts.numExistingThreads, newNumProcessingWork)
+            var newNumExistingThreads = max(getNumExistingThreads(counts), newNumProcessingWork)
 
             // TODO - decide if it's desired
-            if (newNumExistingThreads == counts.numExistingThreads && newNumExistingThreads < corePoolSize) {
+            if (newNumExistingThreads == getNumExistingThreads(counts) && newNumExistingThreads < corePoolSize) {
                 newNumExistingThreads++
             }
 
-            toRelease = newNumProcessingWork - counts.numProcessingWork
-            toCreate = newNumExistingThreads - counts.numExistingThreads
+            toRelease = newNumProcessingWork - getNumProcessingWork(counts)
+            toCreate = newNumExistingThreads - getNumExistingThreads(counts)
+
+            counts = updateNumExistingThreads(counts, newNumExistingThreads)
+            counts = updateNumExistingThreads(counts)
             counts.numExistingThreads = newNumExistingThreads
             counts.numProcessingWork = newNumProcessingWork
         }
