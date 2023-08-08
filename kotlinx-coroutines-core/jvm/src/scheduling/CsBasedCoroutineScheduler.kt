@@ -14,6 +14,7 @@ import java.util.concurrent.*
 import java.util.concurrent.atomic.*
 import java.util.concurrent.locks.*
 import java.util.concurrent.locks.LockSupport.*
+import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.*
 import kotlin.jvm.internal.*
 import kotlin.random.*
@@ -57,7 +58,7 @@ internal class CsBasedCoroutineScheduler(
     private val numProcessors = Runtime.getRuntime().availableProcessors()
     private val threadsToAddWithoutDelay = numProcessors
     private val threadsPerDelayStep = numProcessors
-    private val counts = ThreadCounts(corePoolSize, this)
+    private val counts = ThreadCounts(corePoolSize)
     private val workerStack = Stack<Worker>()
     private val numRequestedWorkers = atomic(0)
     private val _isTerminated = atomic(false)
@@ -76,7 +77,7 @@ internal class CsBasedCoroutineScheduler(
     private var threadAdjustmentIntervalMs = 0
     private var completionCount = 0
     private var priorCompletionCount = 0
-    private var nextCompletedWorkRequestsTime = 0L
+    @Volatile private var nextCompletedWorkRequestsTime = 0L
     private var priorCompletedWorkRequestTime = 0L
     private var numBlockingTasks = 0
     private var numThreadsAddedDueToBlocking = 0
