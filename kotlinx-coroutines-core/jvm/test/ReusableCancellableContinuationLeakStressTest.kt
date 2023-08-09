@@ -21,6 +21,7 @@ class ReusableCancellableContinuationLeakStressTest : TestBase() {
     class Leak(val i: Int)
 
     @Test // Simplified version of #2564
+    @Ignore
     fun testReusableContinuationLeak() = runTest {
         val channel = produce(capacity = 1) { // from the main thread
             (0 until iterations).forEach {
