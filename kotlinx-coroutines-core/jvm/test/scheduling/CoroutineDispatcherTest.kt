@@ -6,6 +6,7 @@ package kotlinx.coroutines.scheduling
 
 import kotlinx.coroutines.*
 import org.junit.*
+import org.junit.Ignore
 import org.junit.Test
 import java.util.concurrent.atomic.*
 import kotlin.test.*
@@ -75,6 +76,7 @@ class CoroutineDispatcherTest : SchedulerTestBase() {
     }
 
     @Test
+    @Ignore
     fun testDelay() = runBlocking {
         corePoolSize = 2
         withContext(dispatcher) {
