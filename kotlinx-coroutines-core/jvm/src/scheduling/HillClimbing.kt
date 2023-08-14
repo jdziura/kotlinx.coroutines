@@ -8,8 +8,7 @@ import kotlin.random.Random
 import kotlin.math.*
 
 internal class HillClimbing(
-    private val minThreads: Int,
-    private val maxThreads: Int
+    private val scheduler: CoroutineScheduler
 ) {
     private class Complex(val re: Double, val im: Double) {
         operator fun plus(other: Complex): Complex {
@@ -71,8 +70,6 @@ internal class HillClimbing(
         private const val THROUGHPUT_ERROR_SMOOTHING_FACTOR = 1.0 / 100.0
         private const val GAIN_EXPONENT = 200.0 / 100.0
         private const val MAX_SAMPLE_ERROR = 15.0 / 100.0
-
-        internal const val ENABLED = false
     }
 
     private val samples = DoubleArray(SAMPLES_TO_MEASURE)
@@ -179,6 +176,9 @@ internal class HillClimbing(
         var newThreadWaveMagnitude = (0.5 + (currentControlSetting * averageThroughputNoise * TARGET_SIGNAL_TO_NOISE_RATIO * THREAD_MAGNITUDE_MULTIPLIER * 2.0)).toInt()
         newThreadWaveMagnitude = min(newThreadWaveMagnitude, MAX_THREAD_WAVE_MAGNITUDE)
         newThreadWaveMagnitude = max(newThreadWaveMagnitude, 1)
+
+        val maxThreads = scheduler.maxPoolSize
+        val minThreads = scheduler.minThreadsGoal
 
         currentControlSetting = min(currentControlSetting, (maxThreads - newThreadWaveMagnitude).toDouble())
         currentControlSetting = max(currentControlSetting, minThreads.toDouble())

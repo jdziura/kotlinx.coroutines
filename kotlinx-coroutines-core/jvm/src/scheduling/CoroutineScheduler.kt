@@ -19,6 +19,9 @@ import kotlin.jvm.internal.*
 import kotlin.math.*
 import kotlin.random.Random
 
+internal const val USE_JAVA_SEMAPHORE = true
+internal const val USE_HILL_CLIMBING = true
+
 // TODO - support idleWorkerKeepAliveNs (for now workers actually terminate only on shutdown
 // TODO - decide if lower bound in HillClimber number of threads should be 1 or corePoolSize
 internal class CoroutineScheduler(
@@ -95,7 +98,7 @@ internal class CoroutineScheduler(
 
     private val semaphore = Semaphore(0)
 
-    private val hillClimber = HillClimbing(MIN_SUPPORTED_POOL_SIZE, maxPoolSize)
+    private val hillClimber = HillClimbing(this)
 
     @Volatile private var nextCompletedWorkRequestsTime = 0L
     @Volatile private var priorCompletedWorkRequestTime = 0L
@@ -114,7 +117,7 @@ internal class CoroutineScheduler(
 
     val isTerminated: Boolean get() = _isTerminated.value
 
-    private val minThreadsGoal: Int
+    val minThreadsGoal: Int
         get() {
             return min(getNumThreadsGoal(threadCounts.get()), targetThreadsForBlockingAdjustment)
         }
@@ -427,7 +430,7 @@ internal class CoroutineScheduler(
     }
 
     private fun shouldAdjustMaxWorkersActive(currentTimeMs: Long): Boolean {
-        if (!HillClimbing.ENABLED) {
+        if (!USE_HILL_CLIMBING) {
             return false
         }
 
@@ -703,11 +706,14 @@ internal class CoroutineScheduler(
 
     // Stack based approach is meaningfully slower, keeping java semaphore for now
     private fun releasePermits(permits: Int) {
-//        workerPermits.addAndGet(permits)
-//        for (i in 0 until permits) {
-//            if (!tryUnpark()) return
-//        }
-        semaphore.release(permits)
+        if (USE_JAVA_SEMAPHORE) {
+            semaphore.release(permits)
+        } else {
+            workerPermits.addAndGet(permits)
+            for (i in 0 until permits) {
+                if (!tryUnpark()) return
+            }
+        }
     }
 
     private fun beforeTask(taskMode: Int) {
@@ -752,6 +758,7 @@ internal class CoroutineScheduler(
         private var rngState = Random.nextInt()
         private var terminationDeadline = 0L
         private var acquireTimedOut = false
+        private var minDelayUntilStealableTasksNs = 0L
 
         inline val scheduler get() = this@CoroutineScheduler
 
@@ -782,6 +789,11 @@ internal class CoroutineScheduler(
                     break
                 } else {
                     mayHaveLocalTasks = false
+                    if (minDelayUntilStealableTasksNs != 0L) {
+                        interrupted()
+                        LockSupport.parkNanos(minDelayUntilStealableTasksNs)
+                        minDelayUntilStealableTasksNs = 0L
+                    }
                 }
 
                 if (numRequestedWorkers.value <= 0) {
@@ -798,20 +810,28 @@ internal class CoroutineScheduler(
 
         // Stack based approach is meaningfully slower, keeping java semaphore for now
         private fun tryAcquirePermit(): Boolean {
-//            while (!acquireTimedOut) {
-//                var cnt = workerPermits.value
-//                while (cnt > 0) {
-//                    if (workerPermits.compareAndSet(cnt, cnt - 1)) {
-//                        acquireTimedOut = false
-//                        return true
-//                    }
-//                    cnt = workerPermits.value
-//                }
-//                tryPark()
-//            }
-//            acquireTimedOut = false
-//            return false
-            return semaphore.tryAcquire(idleWorkerKeepAliveNs, TimeUnit.NANOSECONDS)
+            if (USE_JAVA_SEMAPHORE) {
+                return try {
+                    semaphore.tryAcquire(idleWorkerKeepAliveNs, TimeUnit.NANOSECONDS)
+                } catch (e: InterruptedException) {
+                    this.interrupt()
+                    false
+                }
+            } else {
+                while (!acquireTimedOut) {
+                    var cnt = workerPermits.value
+                    while (cnt > 0) {
+                        if (workerPermits.compareAndSet(cnt, cnt - 1)) {
+                            acquireTimedOut = false
+                            return true
+                        }
+                        cnt = workerPermits.value
+                    }
+                    tryPark()
+                }
+                acquireTimedOut = false
+                return false
+            }
         }
 
         private fun findTask(scanLocalQueue: Boolean): Task? {
@@ -930,16 +950,12 @@ internal class CoroutineScheduler(
         private fun dispatchFromQueue(): Boolean {
             markThreadRequestSatisfied()
 
-            var workItem: Task? = findTask(mayHaveLocalTasks) ?: return true
             var startTickCount = System.currentTimeMillis()
-
             while (true) {
-                if (workItem == null) {
-                    workItem = findTask(mayHaveLocalTasks) ?: return true
-                }
+                val workItem = findTask(mayHaveLocalTasks) ?: return true
 
+                minDelayUntilStealableTasksNs = 0L
                 executeWorkItem(workItem)
-                workItem = null
 
                 val currentTickCount = System.currentTimeMillis()
                 if (!notifyWorkItemComplete(currentTickCount)) {
@@ -968,6 +984,7 @@ internal class CoroutineScheduler(
 
             var missedSteal = false
             var currentIndex = nextInt(created)
+            var minDelay = Long.MAX_VALUE
             repeat(created) {
                 ++currentIndex
                 if (currentIndex > created) currentIndex = 1
@@ -978,12 +995,17 @@ internal class CoroutineScheduler(
                         val result = stolenTask.element
                         stolenTask.element = null
                         return (result to false)
-                    } else if (worker.localQueue.size > 0) {
-                        missedSteal = true
+                    } else {
+                        if (worker.localQueue.size > 0) {
+                            missedSteal = true
+                        }
+                        if (stealResult > 0) {
+                            minDelay = min(minDelay, stealResult)
+                        }
                     }
                 }
             }
-
+            minDelayUntilStealableTasksNs = if (minDelay != Long.MAX_VALUE) minDelay else 0
             return (null to missedSteal)
         }
 
