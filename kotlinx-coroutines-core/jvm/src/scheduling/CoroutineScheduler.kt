@@ -701,12 +701,13 @@ internal class CoroutineScheduler(
         }
     }
 
+    // Stack based approach is meaningfully slower, keeping java semaphore for now
     private fun releasePermits(permits: Int) {
-        workerPermits.addAndGet(permits)
-        for (i in 0 until permits) {
-            if (!tryUnpark()) return
-        }
-//        semaphore.release(permits)
+//        workerPermits.addAndGet(permits)
+//        for (i in 0 until permits) {
+//            if (!tryUnpark()) return
+//        }
+        semaphore.release(permits)
     }
 
     private fun beforeTask(taskMode: Int) {
@@ -795,21 +796,22 @@ internal class CoroutineScheduler(
             }
         }
 
+        // Stack based approach is meaningfully slower, keeping java semaphore for now
         private fun tryAcquirePermit(): Boolean {
-            while (!acquireTimedOut) {
-                var cnt = workerPermits.value
-                while (cnt > 0) {
-                    if (workerPermits.compareAndSet(cnt, cnt - 1)) {
-                        acquireTimedOut = false
-                        return true
-                    }
-                    cnt = workerPermits.value
-                }
-                tryPark()
-            }
-            acquireTimedOut = false
-            return false
-//            return semaphore.tryAcquire(idleWorkerKeepAliveNs, TimeUnit.NANOSECONDS)
+//            while (!acquireTimedOut) {
+//                var cnt = workerPermits.value
+//                while (cnt > 0) {
+//                    if (workerPermits.compareAndSet(cnt, cnt - 1)) {
+//                        acquireTimedOut = false
+//                        return true
+//                    }
+//                    cnt = workerPermits.value
+//                }
+//                tryPark()
+//            }
+//            acquireTimedOut = false
+//            return false
+            return semaphore.tryAcquire(idleWorkerKeepAliveNs, TimeUnit.NANOSECONDS)
         }
 
         private fun findTask(scanLocalQueue: Boolean): Task? {
