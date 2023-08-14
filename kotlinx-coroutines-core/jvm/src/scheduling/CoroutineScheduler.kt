@@ -239,6 +239,7 @@ internal class CoroutineScheduler(
         if (this == null) return task
         if (task.isBlocking) return task
         if (isTerminated) return task
+        mayHaveLocalTasks = true
         return localQueue.add(task, fair = tailDispatch)
     }
 
@@ -353,6 +354,10 @@ internal class CoroutineScheduler(
     }
 
     private fun shouldAdjustMaxWorkersActive(currentTimeMs: Long): Boolean {
+        if (!HillClimbing.ENABLED) {
+            return false
+        }
+
         val priorTime = priorCompletedWorkRequestTime
         val requiredInterval = nextCompletedWorkRequestsTime - priorTime
         val elapsedInterval = currentTimeMs - priorTime
@@ -656,6 +661,9 @@ internal class CoroutineScheduler(
         @JvmField
         val localQueue: WorkQueue = WorkQueue()
 
+        @JvmField
+        var mayHaveLocalTasks = false
+
         val inStack = atomic(false)
 
         private val stolenTask: Ref.ObjectRef<Task?> = Ref.ObjectRef()
@@ -692,13 +700,15 @@ internal class CoroutineScheduler(
                 if (!dispatchFromQueue()) {
                     alreadyRemovedWorkingWorker = true
                     break
+                } else {
+                    mayHaveLocalTasks = false
                 }
 
                 if (numRequestedWorkers.value <= 0) {
                     break
                 }
 
-                yield()
+//                yield()
             }
 
             if (!alreadyRemovedWorkingWorker) {
@@ -706,10 +716,15 @@ internal class CoroutineScheduler(
             }
         }
 
-        private fun dequeue(globalFirst: Boolean = false): Task? {
-            if (globalFirst) pollGlobalQueues()?.let { return it }
-            localQueue.poll()?.let { return it }
-            if (!globalFirst) pollGlobalQueues()?.let { return it }
+        private fun findTask(scanLocalQueue: Boolean): Task? {
+            if (scanLocalQueue) {
+                val globalFirst = nextInt(2 * corePoolSize) == 0
+                if (globalFirst) pollGlobalQueues()?.let { return it }
+                localQueue.poll()?.let { return it }
+                if (!globalFirst) pollGlobalQueues()?.let { return it }
+            } else {
+                pollGlobalQueues()?.let { return it }
+            }
 
             val (task, missedSteal) = trySteal(STEAL_ANY)
             if (missedSteal) {
@@ -779,12 +794,12 @@ internal class CoroutineScheduler(
         private fun dispatchFromQueue(): Boolean {
             markThreadRequestSatisfied()
 
-            var workItem: Task? = dequeue(globalFirst = true) ?: return true
+            var workItem: Task? = findTask(mayHaveLocalTasks) ?: return true
             var startTickCount = System.currentTimeMillis()
 
             while (true) {
                 if (workItem == null) {
-                    workItem = dequeue() ?: return true
+                    workItem = findTask(mayHaveLocalTasks) ?: return true
                 }
 
                 executeWorkItem(workItem)

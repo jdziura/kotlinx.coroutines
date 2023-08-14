@@ -71,6 +71,8 @@ internal class HillClimbing(
         private const val THROUGHPUT_ERROR_SMOOTHING_FACTOR = 1.0 / 100.0
         private const val GAIN_EXPONENT = 200.0 / 100.0
         private const val MAX_SAMPLE_ERROR = 15.0 / 100.0
+
+        internal const val ENABLED = false
     }
 
     private val samples = DoubleArray(SAMPLES_TO_MEASURE)
