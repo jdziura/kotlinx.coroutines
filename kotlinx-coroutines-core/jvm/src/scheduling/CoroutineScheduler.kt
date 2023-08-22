@@ -20,10 +20,8 @@ import kotlin.math.*
 import kotlin.random.Random
 
 internal const val USE_JAVA_SEMAPHORE = true
-internal const val USE_HILL_CLIMBING = true
+internal const val USE_HILL_CLIMBING = false
 
-// TODO - support idleWorkerKeepAliveNs (for now workers actually terminate only on shutdown
-// TODO - decide if lower bound in HillClimber number of threads should be 1 or corePoolSize
 internal class CoroutineScheduler(
     @JvmField val corePoolSize: Int,
     @JvmField val maxPoolSize: Int,

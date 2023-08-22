@@ -8,7 +8,7 @@ internal class DelayHelper {
     companion object {
         const val GATE_ACTIVITIES_PERIOD_MS = 500L
     }
-    // TODO - check starting values
+
     private var previousGateActivitiesTimeMs = 0L
     private var previousBlockingAdjustmentDelayStartTimeMs = 0L
     private var previousBlockingAdjustmentDelayMs = 0L
