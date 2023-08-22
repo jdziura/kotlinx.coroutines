@@ -798,7 +798,7 @@ internal class CoroutineScheduler(
                     break
                 }
 
-//                yield()
+                yield()
             }
 
             if (!alreadyRemovedWorkingWorker) {
