@@ -20,7 +20,7 @@ import kotlin.math.*
 import kotlin.random.Random
 
 internal const val USE_JAVA_SEMAPHORE = true
-internal const val USE_HILL_CLIMBING = false
+internal const val USE_HILL_CLIMBING = true
 internal const val LOG_MAJOR_HC_ADJUSTMENTS = false
 
 internal class CoroutineScheduler(

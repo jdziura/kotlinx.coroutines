@@ -227,7 +227,7 @@ internal class HillClimbing(
 
             if (LOG_MAJOR_HC_ADJUSTMENTS) {
                 val throughput =
-                    if (secondsElapsedSinceLastChange > 0.0) completionsSinceLastChange / secondsElapsedSinceLastChange else 0
+                    if (secondsElapsedSinceLastChange > 0.0) completionsSinceLastChange.toDouble() / secondsElapsedSinceLastChange else 0.0
                 System.err.println("HC: [$newThreadCount, $throughput, $state]")
             }
         }
