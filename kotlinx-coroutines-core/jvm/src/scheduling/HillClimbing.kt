@@ -57,19 +57,32 @@ internal class HillClimbing(
     }
 
     companion object {
-        private const val WAVE_PERIOD = 4
-        private const val MAX_THREAD_WAVE_MAGNITUDE = 20
-        private const val THREAD_MAGNITUDE_MULTIPLIER = 100.0 / 100.0
+        private const val DEFAULT_WAVE_PERIOD = 4
+        private const val DEFAULT_MAX_THREAD_WAVE_MAGNITUDE = 20
+        private const val DEFAULT_THREAD_MAGNITUDE_MULTIPLIER = 100.0 / 100.0
+        private const val DEFAULT_TARGET_THROUGHPUT_RATIO = 15.0 / 100.0
+        private const val DEFAULT_TARGET_SIGNAL_TO_NOISE_RATIO = 300.0 / 100.0
+        private const val DEFAULT_MAX_CHANGE_PER_SECOND = 4
+        private const val DEFAULT_MAX_CHANGE_PER_SAMPLE = 20
+        private const val DEFAULT_SAMPLE_INTERVAL_MS_LOW = 10
+        private const val DEFAULT_SAMPLE_INTERVAL_MS_HIGH = 200
+        private const val DEFAULT_THROUGHPUT_ERROR_SMOOTHING_FACTOR = 1.0 / 100.0
+        private const val DEFAULT_GAIN_EXPONENT = 200.0 / 100.0
+        private const val DEFAULT_MAX_SAMPLE_ERROR = 15.0 / 100.0
+
+        private const val WAVE_PERIOD = DEFAULT_WAVE_PERIOD
+        private const val MAX_THREAD_WAVE_MAGNITUDE = DEFAULT_MAX_THREAD_WAVE_MAGNITUDE
+        private const val THREAD_MAGNITUDE_MULTIPLIER = DEFAULT_THREAD_MAGNITUDE_MULTIPLIER
         private const val SAMPLES_TO_MEASURE = WAVE_PERIOD * 8
-        private const val TARGET_THROUGHPUT_RATIO = 15.0 / 100.0
-        private const val TARGET_SIGNAL_TO_NOISE_RATIO = 300.0 / 100.0
-        private const val MAX_CHANGE_PER_SECOND = 4
-        private const val MAX_CHANGE_PER_SAMPLE = 20
-        private const val SAMPLE_INTERVAL_MS_LOW = 10
-        private const val SAMPLE_INTERVAL_MS_HIGH = 200
-        private const val THROUGHPUT_ERROR_SMOOTHING_FACTOR = 1.0 / 100.0
-        private const val GAIN_EXPONENT = 200.0 / 100.0
-        private const val MAX_SAMPLE_ERROR = 15.0 / 100.0
+        private const val TARGET_THROUGHPUT_RATIO = DEFAULT_TARGET_THROUGHPUT_RATIO
+        private const val TARGET_SIGNAL_TO_NOISE_RATIO = DEFAULT_TARGET_SIGNAL_TO_NOISE_RATIO
+        private const val MAX_CHANGE_PER_SECOND = DEFAULT_MAX_CHANGE_PER_SECOND
+        private const val MAX_CHANGE_PER_SAMPLE = DEFAULT_MAX_CHANGE_PER_SAMPLE
+        private const val SAMPLE_INTERVAL_MS_LOW = DEFAULT_SAMPLE_INTERVAL_MS_LOW
+        private const val SAMPLE_INTERVAL_MS_HIGH = DEFAULT_SAMPLE_INTERVAL_MS_HIGH
+        private const val THROUGHPUT_ERROR_SMOOTHING_FACTOR = DEFAULT_THROUGHPUT_ERROR_SMOOTHING_FACTOR
+        private const val GAIN_EXPONENT = DEFAULT_GAIN_EXPONENT
+        private const val MAX_SAMPLE_ERROR = DEFAULT_MAX_SAMPLE_ERROR
     }
 
     private val samples = DoubleArray(SAMPLES_TO_MEASURE)

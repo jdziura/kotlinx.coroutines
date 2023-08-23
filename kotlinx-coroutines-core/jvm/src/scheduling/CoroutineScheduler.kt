@@ -10,7 +10,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.internal.ReentrantLock
 import java.io.*
 import java.lang.Runnable
-import java.util.Stack
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.locks.LockSupport
@@ -20,9 +19,12 @@ import kotlin.math.*
 import kotlin.random.Random
 
 internal const val USE_JAVA_SEMAPHORE = true
-internal const val USE_HILL_CLIMBING = true
+internal const val USE_HILL_CLIMBING = false
+internal const val DETECT_STARVATION = true
+
 internal const val LOG_MAJOR_HC_ADJUSTMENTS = false
 
+@Suppress("NOTHING_TO_INLINE")
 internal class CoroutineScheduler(
     @JvmField val corePoolSize: Int,
     @JvmField val maxPoolSize: Int,
@@ -88,7 +90,6 @@ internal class CoroutineScheduler(
     private val completionCount = atomic(0)
     private val numBlockingTasks = atomic(0)
     private val createdWorkers = atomic(0)
-    private val lastDequeueTime = atomic(0L)
     private val parkedWorkersStack = atomic(0L)
     private val runGateThreadEvent = AutoResetEvent(true)
     private val delayEvent = AutoResetEvent(false)
@@ -98,6 +99,8 @@ internal class CoroutineScheduler(
     private val semaphore = Semaphore(0)
 
     private val hillClimber = HillClimbing(this)
+
+    @Volatile private var lastDequeueTime = 0L
 
     @Volatile private var nextCompletedWorkRequestsTime = 0L
     @Volatile private var priorCompletedWorkRequestTime = 0L
@@ -114,15 +117,15 @@ internal class CoroutineScheduler(
     @JvmField
     val globalQueue = GlobalQueue()
 
-    val isTerminated: Boolean get() = _isTerminated.value
+    val isTerminated: Boolean inline get() = _isTerminated.value
 
     val minThreadsGoal: Int
-        get() {
+        inline get() {
             return min(getNumThreadsGoal(threadCounts.get()), targetThreadsForBlockingAdjustment)
         }
 
     private val targetThreadsForBlockingAdjustment: Int
-        get() {
+        inline get() {
             val numBlocking: Int = numBlockingTasks.value
             return if (numBlocking <= 0) {
                 corePoolSize
@@ -131,28 +134,28 @@ internal class CoroutineScheduler(
             }
         }
 
-    private fun getThreadCountsValue(data: Long, mask: Long, shift: Int): Int {
+    private inline fun getThreadCountsValue(data: Long, mask: Long, shift: Int): Int {
         return ((data and mask) shr shift).toInt()
     }
 
-    private fun getThreadCountsUpdatedData(data: Long, value: Int, mask: Long, shift: Int): Long {
+    private inline fun getThreadCountsUpdatedData(data: Long, value: Int, mask: Long, shift: Int): Long {
         return (data and mask.inv()) or (value.toLong() shl shift)
     }
 
-    private fun getNumProcessingWork(data: Long = threadCounts.get()) =
+    private inline fun getNumProcessingWork(data: Long = threadCounts.get()) =
         getThreadCountsValue(data, MASK_PROCESSING_WORK, SHIFT_PROCESSING_WORK)
-    private fun getNumExistingThreads(data: Long = threadCounts.get()) =
+    private inline fun getNumExistingThreads(data: Long = threadCounts.get()) =
         getThreadCountsValue(data, MASK_EXISTING_THREADS, SHIFT_EXISTING_THREADS)
-    private fun getNumThreadsGoal(data: Long = threadCounts.get()) =
+    private inline fun getNumThreadsGoal(data: Long = threadCounts.get()) =
         getThreadCountsValue(data, MASK_THREADS_GOAL, SHIFT_THREADS_GOAL)
 
     // set functions only return updated value, don't change anything in place
-    private fun updateNumProcessingWork(data: Long, value: Int) = getThreadCountsUpdatedData(data, value, MASK_PROCESSING_WORK, SHIFT_PROCESSING_WORK)
-    private fun updateNumExistingThreads(data: Long, value: Int) = getThreadCountsUpdatedData(data, value, MASK_EXISTING_THREADS, SHIFT_EXISTING_THREADS)
-    private fun updateNumThreadsGoal(data: Long, value: Int) = getThreadCountsUpdatedData(data, value, MASK_THREADS_GOAL, SHIFT_THREADS_GOAL)
+    private inline fun updateNumProcessingWork(data: Long, value: Int) = getThreadCountsUpdatedData(data, value, MASK_PROCESSING_WORK, SHIFT_PROCESSING_WORK)
+    private inline fun updateNumExistingThreads(data: Long, value: Int) = getThreadCountsUpdatedData(data, value, MASK_EXISTING_THREADS, SHIFT_EXISTING_THREADS)
+    private inline fun updateNumThreadsGoal(data: Long, value: Int) = getThreadCountsUpdatedData(data, value, MASK_THREADS_GOAL, SHIFT_THREADS_GOAL)
 
-    private fun decrementNumProcessingWork(data: Long) = data - (1L shl SHIFT_PROCESSING_WORK)
-    private fun decrementNumExistingThreads(data: Long) = data - (1L shl SHIFT_EXISTING_THREADS)
+    private inline fun decrementNumProcessingWork(data: Long) = data - (1L shl SHIFT_PROCESSING_WORK)
+    private inline fun decrementNumExistingThreads(data: Long) = data - (1L shl SHIFT_EXISTING_THREADS)
 
     private fun interlockedSetNumThreadsGoal(value: Int): Long {
         var counts = threadCounts.get()
@@ -358,19 +361,6 @@ internal class CoroutineScheduler(
         ensureGateThreadRunning()
     }
 
-    private fun notifyWorkItemComplete(currentTimeMs: Long): Boolean {
-        notifyWorkItemProgress(currentTimeMs)
-        return !shouldStopProcessingWorkNow()
-    }
-
-    private fun notifyWorkItemProgress(currentTimeMs: Long) {
-        completionCount.incrementAndGet()
-        lastDequeueTime.getAndSet(currentTimeMs)
-        if (shouldAdjustMaxWorkersActive(currentTimeMs)) {
-            adjustMaxWorkersActive()
-        }
-    }
-
     private fun adjustMaxWorkersActive() {
         var addWorker = false
         if (!threadAdjustmentLock.tryLock()) {
@@ -412,48 +402,6 @@ internal class CoroutineScheduler(
         if (addWorker) {
             maybeAddWorker()
         }
-    }
-
-    private fun shouldStopProcessingWorkNow(): Boolean {
-        var counts = threadCounts.get()
-        while (true) {
-            if (getNumProcessingWork(counts) <= getNumThreadsGoal(counts)) {
-                return false
-            }
-
-            val newCounts = decrementNumProcessingWork(counts)
-            val oldCounts = threadCounts.compareAndExchange(counts, newCounts)
-
-            if (oldCounts == counts) {
-                return true
-            }
-
-            counts = oldCounts
-            // TODO - remove this, doesn't compile with above line without it for some reason
-            require(counts == oldCounts)
-        }
-    }
-
-    private fun shouldAdjustMaxWorkersActive(currentTimeMs: Long): Boolean {
-        if (!USE_HILL_CLIMBING) {
-            return false
-        }
-
-        val priorTime = priorCompletedWorkRequestTime
-        val requiredInterval = nextCompletedWorkRequestsTime - priorTime
-        val elapsedInterval = currentTimeMs - priorTime
-
-        if (elapsedInterval < requiredInterval) {
-            return false
-        }
-
-        val counts = threadCounts.get()
-
-        if (getNumProcessingWork(counts) > getNumThreadsGoal(counts)) {
-            return false
-        }
-
-        return pendingBlockingAdjustment == PendingBlockingAdjustment.None
     }
 
     private fun maybeAddWorker() {
@@ -661,7 +609,7 @@ internal class CoroutineScheduler(
     }
 
     private fun sufficientDelaySinceLastDequeue(): Boolean {
-        val delay = System.currentTimeMillis() - lastDequeueTime.value
+        val delay = System.currentTimeMillis() - lastDequeueTime
 
         // TODO - check for CPU utilization
         val minimumDelay = GATE_ACTIVITIES_PERIOD_MS
@@ -788,7 +736,9 @@ internal class CoroutineScheduler(
         private fun doWork() {
             var alreadyRemovedWorkingWorker = false
             while (takeActiveRequest()) {
-                lastDequeueTime.getAndSet(System.currentTimeMillis())
+                if (DETECT_STARVATION) {
+                    lastDequeueTime = System.currentTimeMillis()
+                }
                 if (!dispatchFromQueue()) {
                     alreadyRemovedWorkingWorker = true
                     break
@@ -812,6 +762,64 @@ internal class CoroutineScheduler(
                 removeWorkingWorker()
             }
         }
+
+        private fun notifyWorkItemComplete(currentTimeMs: Long): Boolean {
+            notifyWorkItemProgress(currentTimeMs)
+            return !shouldStopProcessingWorkNow()
+        }
+
+        private fun notifyWorkItemProgress(currentTimeMs: Long) {
+            completionCount.incrementAndGet()
+            if (DETECT_STARVATION) {
+                lastDequeueTime = currentTimeMs
+            }
+            if (shouldAdjustMaxWorkersActive(currentTimeMs)) {
+                adjustMaxWorkersActive()
+            }
+        }
+
+        private fun shouldStopProcessingWorkNow(): Boolean {
+            var counts = threadCounts.get()
+            while (true) {
+                if (getNumProcessingWork(counts) <= getNumThreadsGoal(counts)) {
+                    return false
+                }
+
+                val newCounts = decrementNumProcessingWork(counts)
+                val oldCounts = threadCounts.compareAndExchange(counts, newCounts)
+
+                if (oldCounts == counts) {
+                    return true
+                }
+
+                counts = oldCounts
+                // TODO - remove this, doesn't compile with above line without it for some reason
+                require(counts == oldCounts)
+            }
+        }
+
+        private fun shouldAdjustMaxWorkersActive(currentTimeMs: Long): Boolean {
+            if (!USE_HILL_CLIMBING) {
+                return false
+            }
+
+            val priorTime = priorCompletedWorkRequestTime
+            val requiredInterval = nextCompletedWorkRequestsTime - priorTime
+            val elapsedInterval = currentTimeMs - priorTime
+
+            if (elapsedInterval < requiredInterval) {
+                return false
+            }
+
+            val counts = threadCounts.get()
+
+            if (getNumProcessingWork(counts) > getNumThreadsGoal(counts)) {
+                return false
+            }
+
+            return pendingBlockingAdjustment == PendingBlockingAdjustment.None
+        }
+
 
         // Stack based approach is meaningfully slower, keeping java semaphore for now
         private fun tryAcquirePermit(): Boolean {
@@ -1038,7 +1046,6 @@ internal class CoroutineScheduler(
         override fun run() = runGateThread()
 
         private fun runGateThread() {
-            val disableStarvationDetection = false
             while (!isTerminated) {
                 runGateThreadEvent.waitOne()
                 var currentTimeMs = System.currentTimeMillis()
@@ -1078,7 +1085,7 @@ internal class CoroutineScheduler(
 
                     // TODO - here log CPU utilization if possible
 
-                    if (!disableStarvationDetection &&
+                    if (DETECT_STARVATION &&
                         pendingBlockingAdjustment == PendingBlockingAdjustment.None &&
                         numRequestedWorkers.value > 0 &&
                         sufficientDelaySinceLastDequeue()) {
