@@ -81,11 +81,16 @@ internal class HillClimbing(
     private var totalSamples = 0L
     private var averageThroughputNoise = 0.0
     private var currentControlSetting = 0.0
+    private var secondsElapsedSinceLastChange = 0.0
+    private var completionsSinceLastChange = 0
 
     fun update(currentThreadCount: Int, pSampleDurationSeconds: Double, pNumCompletions: Int): Pair<Int, Int> {
         if (currentThreadCount != lastThreadCount) {
             forceChange(currentThreadCount, StateOrTransition.Initializing)
         }
+
+        secondsElapsedSinceLastChange += pSampleDurationSeconds
+        completionsSinceLastChange += pNumCompletions
 
         val sampleDurationSeconds = pSampleDurationSeconds + accumulatedSampleDurationSeconds
         val numCompletions = pNumCompletions + accumulatedCompletionCount
@@ -110,7 +115,7 @@ internal class HillClimbing(
         var confidence = 0.0
         var state = StateOrTransition.Warmup
 
-        val sampleCount = (min(totalSamples - 1, SAMPLES_TO_MEASURE.toLong()).toInt() / WAVE_PERIOD) * WAVE_PERIOD
+        val sampleCount = min(totalSamples - 1, SAMPLES_TO_MEASURE.toLong()).toInt() / WAVE_PERIOD * WAVE_PERIOD
 
         if (sampleCount > WAVE_PERIOD) {
             var sampleSum = 0.0
@@ -143,7 +148,6 @@ internal class HillClimbing(
                     (THROUGHPUT_ERROR_SMOOTHING_FACTOR * throughputErrorEstimate) + ((1.0 - THROUGHPUT_ERROR_SMOOTHING_FACTOR) * averageThroughputNoise)
                 }
 
-                // TODO - check if > 0 or > eps
                 if (threadWaveComponent.abs() > 0.0) {
                     ratio = (throughputWaveComponent - (threadWaveComponent * TARGET_THROUGHPUT_RATIO)) / threadWaveComponent
                     state = StateOrTransition.ClimbingMove
@@ -196,6 +200,8 @@ internal class HillClimbing(
 
         if (newThreadCount != currentThreadCount) {
             changeThreadCount(newThreadCount, state)
+            secondsElapsedSinceLastChange = 0.0
+            completionsSinceLastChange = 0
         }
 
         val newSampleInterval = if (ratio.re < 0.0 && newThreadCount == minThreads) {
@@ -218,6 +224,12 @@ internal class HillClimbing(
         lastThreadCount = newThreadCount
         if (state != StateOrTransition.CooperativeBlocking) {
             currentSampleMs = Random.nextInt(SAMPLE_INTERVAL_MS_LOW, SAMPLE_INTERVAL_MS_HIGH + 1)
+
+            if (LOG_MAJOR_HC_ADJUSTMENTS) {
+                val throughput =
+                    if (secondsElapsedSinceLastChange > 0.0) completionsSinceLastChange / secondsElapsedSinceLastChange else 0
+                System.err.println("HC: [$newThreadCount, $throughput, $state]")
+            }
         }
     }
 

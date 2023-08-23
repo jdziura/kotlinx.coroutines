@@ -21,6 +21,7 @@ import kotlin.random.Random
 
 internal const val USE_JAVA_SEMAPHORE = true
 internal const val USE_HILL_CLIMBING = false
+internal const val LOG_MAJOR_HC_ADJUSTMENTS = false
 
 internal class CoroutineScheduler(
     @JvmField val corePoolSize: Int,
@@ -307,6 +308,12 @@ internal class CoroutineScheduler(
 
     private fun markThreadRequestSatisfied() {
         hasOutstandingThreadRequest.getAndSet(0)
+
+        // May prevent deadlocks where many blocking tasks arrive and contention opt
+        // in ensureThreadRequested() may not create enough threads.
+//        if (getNumProcessingWork(threadCounts.get()) < targetThreadsForBlockingAdjustment) {
+//            ensureThreadRequested()
+//        }
     }
 
     private fun Worker?.submitToLocalQueue(task: Task, tailDispatch: Boolean): Task? {
@@ -326,11 +333,11 @@ internal class CoroutineScheduler(
         // Scenario not working for now:
         // Many blocking tasks are created, many concurrent thread requests, some fail
 
-//        if (hasOutstandingThreadRequest.compareAndSet(0, 1)) {
-//            requestWorker()
-//        }
+        if (hasOutstandingThreadRequest.compareAndSet(0, 1)) {
+            requestWorker()
+        }
 
-        requestWorker()
+//        requestWorker()
     }
 
     private fun currentWorker(): Worker? = (Thread.currentThread() as? Worker)?.takeIf { it.scheduler == this }
@@ -949,8 +956,15 @@ internal class CoroutineScheduler(
             markThreadRequestSatisfied()
 
             var startTickCount = System.currentTimeMillis()
+            var firstLoop = true
+
             while (true) {
                 val workItem = findTask(mayHaveLocalTasks) ?: return true
+
+                if (firstLoop) {
+                    ensureThreadRequested()
+                    firstLoop = false
+                }
 
                 minDelayUntilStealableTasksNs = 0L
                 executeWorkItem(workItem)
