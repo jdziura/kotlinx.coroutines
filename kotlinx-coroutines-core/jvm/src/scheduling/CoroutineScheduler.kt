@@ -19,8 +19,9 @@ import kotlin.math.*
 import kotlin.random.Random
 
 internal const val USE_JAVA_SEMAPHORE = true
-internal const val USE_HILL_CLIMBING = false
+internal const val USE_HILL_CLIMBING = true
 internal const val DETECT_STARVATION = true
+internal const val DISABLE_STEALING_DELAY = false
 
 internal const val LOG_MAJOR_HC_ADJUSTMENTS = false
 
@@ -245,7 +246,11 @@ internal class CoroutineScheduler(
     fun createTask(block: Runnable, taskContext: TaskContext): Task {
         val nanoTime = schedulerTimeSource.nanoTime()
         if (block is Task) {
-            block.submissionTime = nanoTime
+            block.submissionTime = if (DISABLE_STEALING_DELAY) {
+                nanoTime - WORK_STEALING_TIME_RESOLUTION_NS
+            } else {
+                nanoTime
+            }
             block.taskContext = taskContext
             return block
         }
