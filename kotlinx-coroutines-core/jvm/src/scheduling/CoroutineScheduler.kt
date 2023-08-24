@@ -17,6 +17,7 @@ import kotlin.concurrent.*
 import kotlin.jvm.internal.*
 import kotlin.math.*
 import kotlin.random.Random
+import kotlin.jvm.internal.Ref.ObjectRef
 
 internal const val USE_JAVA_SEMAPHORE = true
 internal const val USE_HILL_CLIMBING = true
@@ -80,6 +81,8 @@ internal class CoroutineScheduler(
         internal const val MAX_SUPPORTED_POOL_SIZE = (1 shl SHIFT_LENGTH) - 2
     }
 
+    private val workStealingQueueList = WorkStealingQueueList()
+
     private val threadsToAddWithoutDelay = AVAILABLE_PROCESSORS
     private val threadsPerDelayStep = AVAILABLE_PROCESSORS
     private val threadCounts = AtomicLong(updateNumThreadsGoal(0L, corePoolSize))
@@ -116,7 +119,7 @@ internal class CoroutineScheduler(
     val workers = ResizableAtomicArray<CoroutineScheduler.Worker>((corePoolSize + 1) * 2)
 
     @JvmField
-    val globalQueue = GlobalQueue()
+    val globalQueue = ConcurrentLinkedQueue<Task?>()
 
     val isTerminated: Boolean inline get() = _isTerminated.value
 
@@ -278,11 +281,11 @@ internal class CoroutineScheduler(
                     LockSupport.unpark(worker)
                     worker.join(timeout)
                 }
-                worker.localQueue.offloadAllWorkTo(globalQueue)
+//                worker.localQueue.offloadAllWorkTo(globalQueue)
             }
         }
 
-        globalQueue.close()
+//        globalQueue.close()
 
 //        while (true) {
 //            val task = currentWorker?.localQueue?.poll()
@@ -307,9 +310,7 @@ internal class CoroutineScheduler(
         val currentWorker = currentWorker()
         val notAdded = currentWorker.submitToLocalQueue(task, tailDispatch)
         if (notAdded != null) {
-            if (!addToGlobalQueue(notAdded)) {
-                throw RejectedExecutionException("$schedulerName was terminated")
-            }
+            globalQueue.add(task)
         }
         ensureThreadRequested()
     }
@@ -325,15 +326,12 @@ internal class CoroutineScheduler(
     }
 
     private fun Worker?.submitToLocalQueue(task: Task, tailDispatch: Boolean): Task? {
+        if (tailDispatch == false) require(true)
         if (this == null) return task
         if (task.isBlocking) return task
         if (isTerminated) return task
-        mayHaveLocalTasks = true
-        return localQueue.add(task, fair = tailDispatch)
-    }
-
-    private fun addToGlobalQueue(task: Task): Boolean {
-        return globalQueue.addLast(task)
+        workStealingQueue.localPush(task)
+        return null
     }
 
     private fun ensureThreadRequested() {
@@ -435,9 +433,9 @@ internal class CoroutineScheduler(
             newNumExistingThreads = max(numExistingThreads, newNumProcessingWork)
 
             // TODO - decide if it's desired
-            if (newNumExistingThreads == numExistingThreads && newNumExistingThreads < corePoolSize) {
-                newNumExistingThreads++
-            }
+//            if (newNumExistingThreads == numExistingThreads && newNumExistingThreads < corePoolSize) {
+//                newNumExistingThreads++
+//            }
 
             var newCounts = counts
 
@@ -687,8 +685,10 @@ internal class CoroutineScheduler(
     }
 
     internal inner class Worker private constructor() : Thread() {
+        val workStealingQueue = WorkStealingQueue(this)
         init {
             isDaemon = true
+            workStealingQueueList.add(workStealingQueue)
         }
 
         var indexInArray = 0
@@ -702,9 +702,6 @@ internal class CoroutineScheduler(
         }
 
         @JvmField
-        val localQueue: WorkQueue = WorkQueue()
-
-        @JvmField
         var mayHaveLocalTasks = false
 
         @Volatile
@@ -712,7 +709,6 @@ internal class CoroutineScheduler(
 
         val workerCtl = atomic(CLAIMED)
 
-        private val stolenTask: Ref.ObjectRef<Task?> = Ref.ObjectRef()
         private var rngState = Random.nextInt()
         private var terminationDeadline = 0L
         private var acquireTimedOut = false
@@ -852,21 +848,45 @@ internal class CoroutineScheduler(
             }
         }
 
-        private fun findTask(scanLocalQueue: Boolean): Task? {
-            if (scanLocalQueue) {
-                val globalFirst = nextInt(2 * corePoolSize) == 0
-                if (globalFirst) pollGlobalQueues()?.let { return it }
-                localQueue.poll()?.let { return it }
-                if (!globalFirst) pollGlobalQueues()?.let { return it }
-            } else {
-                pollGlobalQueues()?.let { return it }
-            }
+        // Dequeue in .NET
+        private fun findTask(): Task? {
+//            val globalFirst = nextInt(2 * corePoolSize) == 0
+//            if (globalFirst) pollGlobalQueues()?.let { return it }
+            workStealingQueue.localPop()?.let { return it }
+            pollGlobalQueues()?.let { return it }
+//            if (!globalFirst) pollGlobalQueues()?.let { return it }
 
-            val (task, missedSteal) = trySteal(STEAL_ANY)
-            if (missedSteal) {
+            val missedSteal = ObjectRef<Boolean>()
+
+//            while (true) {
+                val queues = synchronized(workStealingQueueList) { workStealingQueueList.queues }
+                val c = queues.size
+                var i = nextInt(c)
+
+                missedSteal.element = false
+
+                repeat(c) {
+                    if (i == c) i = 0
+                    val otherQueue = queues[i]!!
+//                    if (otherQueue != workStealingQueue) {
+//                        System.err.println("${Thread.currentThread().name} wants to steal from ${otherQueue.owner} and ${otherQueue.canSteal}")
+//                    }
+                    if (otherQueue != workStealingQueue && otherQueue.canSteal) {
+                        otherQueue.trySteal(missedSteal)?.let { return it }
+                    }
+                    i++
+                }
+
+                // maybe new queue arrived, then repeat
+//                val newQueues = synchronized(workStealingQueueList) { workStealingQueueList.queues }
+//                if (newQueues == queues) break
+//            }
+
+            if (missedSteal.element) {
                 ensureThreadRequested()
             }
-            return task
+
+            return null
         }
 
         private fun shouldExitWorker(): Boolean {
@@ -972,7 +992,7 @@ internal class CoroutineScheduler(
             var firstLoop = true
 
             while (true) {
-                val workItem = findTask(mayHaveLocalTasks) ?: return true
+                val workItem = findTask() ?: return true
 
                 if (firstLoop) {
                     ensureThreadRequested()
@@ -996,42 +1016,7 @@ internal class CoroutineScheduler(
         }
 
         private fun pollGlobalQueues(): Task? {
-            return globalQueue.removeFirstOrNull()
-        }
-
-        // TODO - maybe rewrite
-        private fun trySteal(stealingMode: StealingMode): Pair<Task?, Boolean> {
-            val created: Int = createdWorkers.value
-
-            if (created < 2) {
-                return (null to false)
-            }
-
-            var missedSteal = false
-            var currentIndex = nextInt(created)
-            var minDelay = Long.MAX_VALUE
-            repeat(created) {
-                ++currentIndex
-                if (currentIndex > created) currentIndex = 1
-                val worker = workers[currentIndex]
-                if (worker !== null && worker !== this) {
-                    val stealResult = worker.localQueue.trySteal(stealingMode, stolenTask)
-                    if (stealResult == TASK_STOLEN) {
-                        val result = stolenTask.element
-                        stolenTask.element = null
-                        return (result to false)
-                    } else {
-                        if (worker.localQueue.size > 0) {
-                            missedSteal = true
-                        }
-                        if (stealResult > 0) {
-                            minDelay = min(minDelay, stealResult)
-                        }
-                    }
-                }
-            }
-            minDelayUntilStealableTasksNs = if (minDelay != Long.MAX_VALUE) minDelay else 0
-            return (null to missedSteal)
+            return globalQueue.poll()
         }
 
         private fun executeWorkItem(workItem: Task) {
