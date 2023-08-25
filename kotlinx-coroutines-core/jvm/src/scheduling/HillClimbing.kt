@@ -186,7 +186,7 @@ internal class HillClimbing(
         move = abs(move).pow(GAIN_EXPONENT) * (if (move >= 0.0) 1.0 else -1.0) * gain
         move = min(move, MAX_CHANGE_PER_SAMPLE.toDouble())
 
-        // TODO: if move > 0 and there is high cpu utilization, don't make a move
+        // [TODO] if move > 0 and there is high cpu utilization, don't make a move
 
         currentControlSetting += move
 
