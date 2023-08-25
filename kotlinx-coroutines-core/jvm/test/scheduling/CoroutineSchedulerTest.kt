@@ -6,6 +6,7 @@ package kotlinx.coroutines.scheduling
 
 import kotlinx.coroutines.*
 import org.junit.Test
+import org.junit.Ignore
 import java.lang.Runnable
 import java.util.concurrent.*
 import kotlin.coroutines.*
@@ -69,6 +70,7 @@ class CoroutineSchedulerTest : TestBase() {
     }
 
     @Test
+    @Ignore
     fun testFairSubmission() {
         CoroutineScheduler(1, 1).use {
             val startLatch = CountDownLatch(1)

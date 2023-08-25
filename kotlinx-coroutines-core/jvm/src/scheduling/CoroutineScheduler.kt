@@ -20,8 +20,8 @@ import kotlin.random.Random
 import kotlin.jvm.internal.Ref.ObjectRef
 
 internal const val USE_JAVA_SEMAPHORE = true
-internal const val USE_HILL_CLIMBING = true
-internal const val DETECT_STARVATION = true
+internal const val USE_HILL_CLIMBING = false
+internal const val DETECT_STARVATION = false
 internal const val DISABLE_STEALING_DELAY = false
 
 internal const val LOG_MAJOR_HC_ADJUSTMENTS = false
@@ -317,12 +317,6 @@ internal class CoroutineScheduler(
 
     private fun markThreadRequestSatisfied() {
         hasOutstandingThreadRequest.getAndSet(0)
-
-        // May prevent deadlocks where many blocking tasks arrive and contention opt
-        // in ensureThreadRequested() may not create enough threads.
-//        if (getNumProcessingWork(threadCounts.get()) < targetThreadsForBlockingAdjustment) {
-//            ensureThreadRequested()
-//        }
     }
 
     private fun Worker?.submitToLocalQueue(task: Task, tailDispatch: Boolean): Task? {

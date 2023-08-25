@@ -67,8 +67,12 @@ class BlockingCoroutineDispatcherMixedStealingStressTest : SchedulerTestBase() {
                 if (waiters >= corePoolSize) break
                 Thread.yield()
             }
+            Thread.sleep(1000)
+            System.err.println("chuj")
             blocking.execute(Runnable {
+                System.err.println("${Thread.currentThread().name} 1")
                 blockingBlocker.await()
+                System.err.println("${Thread.currentThread().name} 2")
             })
             regular.execute(Runnable {
             })
