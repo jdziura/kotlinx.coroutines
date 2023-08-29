@@ -27,14 +27,13 @@ internal const val ENABLE_HILL_CLIMBING = true
 internal const val ENABLE_STARVATION_DETECTION = false
 
 // If enabled, tasks added to local queues will have to wait for a small period of time until they
-// can be stealable. Enabling it can potentially harm HillClimbing, but reduces contention
-// when there are many quick tasks.
+// can be stealable. Reduces contention when there are many quick tasks.
 // Does nothing if not using kotlin local queues
-internal const val ENABLE_MIN_DELAY_UNTIL_STEALING = true
+internal const val ENABLE_MIN_DELAY_UNTIL_STEALING = false
 
 // If set to true, there could be up to CPU-count active thread requests (entering ensureThreadRequested()).
 // Otherwise, only 1 request is allowed at a time.
-internal const val ENABLE_CONCURRENT_THREAD_REQUESTS = false
+internal const val ENABLE_CONCURRENT_THREAD_REQUESTS = true
 
 // If false, will use ported .NET implementation
 // [TODO] Fix, current implementation may result in deadlock
@@ -640,7 +639,7 @@ internal class CoroutineScheduler(
     }
 
     internal inner class Worker private constructor() : Thread() {
-        val localQueueDotnet: WorkStealingQueue = WorkStealingQueue(this)
+        val localQueueDotnet = WorkStealingQueue()
         init {
             isDaemon = true
             if (!USE_KOTLIN_LOCAL_QUEUES) {
