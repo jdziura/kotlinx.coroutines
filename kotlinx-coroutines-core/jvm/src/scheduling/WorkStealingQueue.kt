@@ -11,7 +11,11 @@ import kotlin.jvm.internal.Ref.ObjectRef
 internal class Spinlock {
     private val flag = AtomicInteger(0)
     fun lock() {
-        while (!flag.compareAndSet(0, 1));
+        while (!flag.compareAndSet(0, 1)) {}
+    }
+
+    fun tryLock(): Boolean {
+        return flag.compareAndSet(0, 1)
     }
 
     fun unlock() {
@@ -19,7 +23,9 @@ internal class Spinlock {
     }
 }
 
-internal class WorkStealingQueue {
+internal class WorkStealingQueue(
+    val owner: CoroutineScheduler.Worker
+) {
     companion object {
         private const val INITIAL_SIZE = 32
     }
@@ -43,6 +49,8 @@ internal class WorkStealingQueue {
     fun localPush(task: Task) {
         var tail = tailIndex
 
+        // [TODO] Reset indexes if tail overflows
+
         if (tail < headIndex + mask) {
             array.set(tail and mask, task)
             tailIndex = tail + 1
@@ -55,7 +63,7 @@ internal class WorkStealingQueue {
                 if (count >= mask) {
                     val newArray = AtomicReferenceArray(arrayOfNulls<Task?>(array.length() * 2))
                     for (i in 0 until array.length()) {
-                        newArray[i] = array[(i + head) and mask]
+                        newArray[i] = array.get((i + head) and mask)
                     }
 
                     array = newArray
@@ -85,17 +93,13 @@ internal class WorkStealingQueue {
 
             if (headIndex <= tail) {
                 val idx = tail and mask
-                val task = array.get(idx) ?: continue
-                array[idx] = null
-                return task
+                return array.getAndSet(idx, null) ?: continue
             } else {
                 return try {
                     if (USE_DOTNET_QUEUE_SPINLOCK) spinlock.lock() else mutex.lock()
                     if (headIndex <= tail) {
                         val idx = tail and mask
-                        val task = array.get(idx) ?: continue
-                        array[idx] = null
-                        task
+                        array.getAndSet(idx, null) ?: continue
                     } else {
                         tailIndex = tail + 1
                         null
@@ -110,24 +114,29 @@ internal class WorkStealingQueue {
     fun trySteal(missedSteal: ObjectRef<Boolean>): Task? {
         while (true) {
             if (canSteal) {
+                missedSteal.element = true
+                var lockTaken = false
                 try {
-                    if (USE_DOTNET_QUEUE_SPINLOCK) spinlock.lock() else mutex.lock()
-                    val head = headIndex
-                    headIndex = head + 1
+                    lockTaken = if (USE_DOTNET_QUEUE_SPINLOCK) spinlock.tryLock() else mutex.tryLock()
+                    if (lockTaken) {
+                        val head = headIndex
+                        headIndex = head + 1
 
-                    if (head < tailIndex) {
-                        val idx = head and mask
-                        val task = array.get(idx) ?: continue
-                        array[idx] = null
-                        return task
+                        if (head < tailIndex) {
+                            val idx = head and mask
+                            return array.getAndSet(idx, null) ?: continue
+                        } else {
+                            headIndex = head
+                            missedSteal.element = true
+                        }
                     } else {
-                        headIndex = head
+                        missedSteal.element = true
                     }
                 } finally {
-                    if (USE_DOTNET_QUEUE_SPINLOCK) spinlock.unlock() else mutex.unlock()
+                    if (lockTaken) {
+                        if (USE_DOTNET_QUEUE_SPINLOCK) spinlock.unlock() else mutex.unlock()
+                    }
                 }
-
-                missedSteal.element = true
             }
 
             return null
