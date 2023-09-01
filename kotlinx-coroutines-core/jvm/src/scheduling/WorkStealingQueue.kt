@@ -4,9 +4,9 @@
 
 package kotlinx.coroutines.scheduling
 
+import kotlinx.coroutines.channels.*
 import kotlinx.coroutines.internal.ReentrantLock
 import java.util.concurrent.atomic.*
-import kotlin.jvm.internal.Ref.ObjectRef
 
 internal class Spinlock {
     private val flag = AtomicInteger(0)
@@ -50,8 +50,7 @@ internal class WorkStealingQueue {
 
         if (tail == Int.MAX_VALUE) {
             // We need to reset indexes. By masking off the unnecessary bits instead of setting to 0,
-            // we don't need to reorder elements in queue
-
+            // we don't need to reorder elements in queue.
             try {
                 mutex.lock()
 
@@ -68,8 +67,7 @@ internal class WorkStealingQueue {
         }
 
         if (tail < headIndex + mask) {
-            // This means that there are at least 2 free elements in array, so we can add new task without resizing
-
+            // This means that there are at least 2 free elements in array, so we can add new task without resizing.
             array.set(tail and mask, task)
             tailIndex = tail + 1
         }
@@ -80,8 +78,8 @@ internal class WorkStealingQueue {
                 val head = headIndex
                 val count = tailIndex - headIndex
 
-                // We need to resize array
                 if (count >= mask) {
+                    // We need to resize array.
                     val newArray = AtomicReferenceArray(arrayOfNulls<Task?>(array.length() * 2))
                     for (i in 0 until array.length()) {
                         newArray[i] = array.get((i + head) and mask)
@@ -94,7 +92,7 @@ internal class WorkStealingQueue {
                     mask = (mask * 2) + 1
                 }
 
-                // Finally, add element
+                // Finally, add element.
                 array.set(tail and mask, task)
                 tailIndex = tail + 1
             } finally {
@@ -103,30 +101,41 @@ internal class WorkStealingQueue {
         }
     }
 
-    private fun localPop(): Task? {
+    fun localPop(): Task? {
         while (true) {
             var tail = tailIndex
             if (headIndex >= tail) {
-                // No tasks in queue, return
+                // No tasks in queue, return.
                 return null
             }
 
-            // Decrease tail beforehand to stop from concurrent stealing
+            // Decrease tail beforehand to stop from concurrent stealing.
             tail--
             tailIndex = tail
 
             if (headIndex <= tail) {
+                // At this point we know that stealing will not interfere
+                // and can retrieve element without taking lock.
+                // Note: I'm not certain if this claim is true, it should be for correctness.
                 val idx = tail and mask
-                return array.getAndSet(idx, null) ?: continue
+                val task = array.get(idx) ?: continue // [TODO] Check when this happens.
+                array.set(idx, null)
+                return task
             } else {
-                return try {
+                // We may be racing with stealing, need to synchronize with a lock.
+                try {
                     mutex.lock()
+
                     if (headIndex <= tail) {
+                        // We won a race and can retrieve popped element.
                         val idx = tail and mask
-                        array.getAndSet(idx, null) ?: continue
+                        val task = array.get(idx) ?: continue // [TODO] Check when this happens.
+                        array.set(idx, null)
+                        return task
                     } else {
+                        // We lost the race and have to restore the tail.
                         tailIndex = tail + 1
-                        null
+                        return null // [TODO] Maybe need to continue instead?
                     }
                 } finally {
                     mutex.unlock()
@@ -135,34 +144,50 @@ internal class WorkStealingQueue {
         }
     }
 
-    fun trySteal(missedSteal: ObjectRef<Boolean>): Task? {
-        while (true) {
-            if (canSteal) {
-                var lockTaken = false
-                try {
-                    lockTaken = mutex.tryLock()
-                    if (lockTaken) {
-                        val head = headIndex
-                        headIndex = head + 1
+    fun trySteal(): ChannelResult<Task?> {
+        var missedSteal = false
 
-                        if (head < tailIndex) {
-                            val idx = head and mask
-                            return array.getAndSet(idx, null) ?: continue
-                        } else {
-                            headIndex = head
-                            missedSteal.element = true
-                        }
-                    } else {
-                        missedSteal.element = true
-                    }
-                } finally {
-                    if (lockTaken) {
-                        mutex.unlock()
-                    }
+        while (canSteal) {
+            var lockTaken = false
+            try {
+                // We only try to lock, to not interfere with concurrent steals and local pop.
+                lockTaken = mutex.tryLock()
+
+                if (!lockTaken) {
+                    missedSteal = true
+                    continue
+                }
+
+                // Increase head beforehand to stop from concurrent local pop
+                val head = headIndex
+                headIndex = head + 1
+
+                if (head < tailIndex) {
+                    // No race should be possible. We can retrieve stolen element.
+                    val idx = head and mask
+                    val task = array.get(idx) ?: continue // [TODO] Check when this happens.
+                    array.set(idx, null)
+                    return ChannelResult.success(task)
+                } else {
+                    // We lost a race and have to restore the head.
+                    headIndex = head
+                    missedSteal = true
+                }
+            } finally {
+                if (lockTaken) {
+                    mutex.unlock()
                 }
             }
+        }
 
-            return null
+        // We didn't succeed.
+        // If we did miss steal though, we need to notify it with ChannelResult.failure(), since
+        // there might be additional work to do in this queue and additional
+        // thread may have to be woken up to process it.
+        return if (missedSteal) {
+            ChannelResult.failure()
+        } else {
+            ChannelResult.success(null)
         }
     }
 }
