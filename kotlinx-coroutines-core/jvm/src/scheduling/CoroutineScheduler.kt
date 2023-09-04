@@ -19,11 +19,11 @@ import kotlin.jvm.internal.Ref.ObjectRef
 import kotlin.math.*
 import kotlin.random.Random
 
-internal const val ENABLE_HILL_CLIMBING = false
+internal const val ENABLE_HILL_CLIMBING = true
 
 // Starvation detection is performed by GateThread twice per second, and tries to inject a thread
 // if no work has been done for this time.
-internal const val ENABLE_STARVATION_DETECTION = false
+internal const val ENABLE_STARVATION_DETECTION = true
 
 // If enabled, tasks added to local queues will have to wait for a small period of time until they
 // can be stealable. Reduces contention when there are many quick tasks.
@@ -42,7 +42,7 @@ internal const val USE_KOTLIN_GLOBAL_QUEUE = false
 
 // If true, uses simple spinlock for places where steal/pop from local queues could interfere.
 // Otherwise, uses reentrant lock
-internal const val USE_DOTNET_QUEUE_SPINLOCK = false
+internal const val USE_DOTNET_QUEUE_SPINLOCK = true
 
 // If true, uses custom .NET semaphore for managing number of active threads.
 // It uses JAVA semaphore under the hood but wraps it with larger logic of spin waiting.
@@ -96,8 +96,8 @@ internal class CoroutineScheduler(
         private const val MASK_EXISTING_THREADS =   MASK_PROCESSING_WORK shl SHIFT_EXISTING_THREADS
         private const val MASK_THREADS_GOAL =       MASK_PROCESSING_WORK shl SHIFT_THREADS_GOAL
 
-        // [TODO] Used only for .NET semaphore
-        private const val SEMAPHORE_SPIN_COUNT = 70
+        // Used only for .NET semaphore
+        private const val SEMAPHORE_SPIN_COUNT = 70 / 2
 
         internal const val MIN_SUPPORTED_POOL_SIZE = 1
         internal const val MAX_SUPPORTED_POOL_SIZE = (1 shl SHIFT_LENGTH) - 2
@@ -474,15 +474,13 @@ internal class CoroutineScheduler(
 
     // Wake up or create gate thread if needed.
     private fun ensureGateThreadRunning() {
-        val numRunsMask = gateThreadRunningState.getAndSet(getRunningStateForNumRuns(MAX_RUNS))
-        if (numRunsMask == getRunningStateForNumRuns(MAX_RUNS)) {
-            return
-        }
-
-        if (numRunsMask == getRunningStateForNumRuns(0)) {
-            runGateThreadEvent.set()
-        } else {
-            createGateThread()
+        if (gateThreadRunningState.value != getRunningStateForNumRuns(MAX_RUNS)) {
+            val numRunsMask: Int = gateThreadRunningState.getAndSet(getRunningStateForNumRuns(MAX_RUNS))
+            if (numRunsMask == getRunningStateForNumRuns(0)) {
+                runGateThreadEvent.set()
+            } else if ((numRunsMask and GATE_THREAD_RUNNING_MASK) == 0) {
+                createGateThread()
+            }
         }
     }
 
@@ -805,7 +803,7 @@ internal class CoroutineScheduler(
 
         private fun tryAcquirePermit(): Boolean {
             if (USE_DOTNET_SEMAPHORE) {
-                return semaphoreDotnet.wait(idleWorkerKeepAliveNs, true)
+                return semaphoreDotnet.wait(idleWorkerKeepAliveNs / 1_000_000, true)
             } else {
                 return try {
                     semaphore.tryAcquire(idleWorkerKeepAliveNs, TimeUnit.NANOSECONDS)

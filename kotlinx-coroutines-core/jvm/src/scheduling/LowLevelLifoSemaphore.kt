@@ -182,7 +182,7 @@ internal abstract class LowLevelLifoSemaphoreBase(
         while (true) {
             val newCounts = counts.addSignalCount(releaseCount)
             var countOfWaitersToWake =
-                minOf(newCounts.signalCount, counts.waiterCount, counts.spinnerCount) -
+                minOf(newCounts.signalCount, counts.waiterCount + counts.spinnerCount) -
                     counts.spinnerCount -
                     counts.signaledToWakeCount
 
@@ -215,8 +215,30 @@ internal class LowLevelLifoSemaphore(
     maximumSignalCount: Int,
     spinCount: Int
 ) : LowLevelLifoSemaphoreBase(initialSignalCount, maximumSignalCount, spinCount) {
+    companion object {
+        private const val SPIN_YIELD_THRESHOLD = 10
+        private const val SPIN_WAITS_PER_ITERATION = 1024
+    }
 
-    val semaphore = Semaphore(0)
+    var counter = 0
+
+    private val semaphore = Semaphore(0)
+
+    private fun spinWait(spinIndex: Int) {
+        if (spinIndex < SPIN_YIELD_THRESHOLD || (spinIndex - SPIN_YIELD_THRESHOLD) % 2 != 0) {
+            var n = SPIN_WAITS_PER_ITERATION
+
+            if (spinIndex <= 30 && (1 shl spinIndex) < SPIN_WAITS_PER_ITERATION) {
+                n = 1 shl spinIndex
+            }
+
+            repeat(n) {
+                counter++
+            }
+        } else {
+            Thread.yield()
+        }
+    }
 
     fun wait(timeoutMs: Long, spinWait: Boolean): Boolean {
         require(timeoutMs >= -1)
@@ -258,8 +280,7 @@ internal class LowLevelLifoSemaphore(
 
         var spinIndex = 0
         while (spinIndex < spinCount) {
-            // [TODO] Check for .NET alternatives for yield() (there is a custom spin waiter)
-            Thread.yield()
+            spinWait(spinIndex)
 
             spinIndex++
             counts = data.get()
@@ -297,7 +318,7 @@ internal class LowLevelLifoSemaphore(
     }
 
     private fun waitCore(timeoutMs: Long): Boolean {
-        return semaphore.tryAcquire(1, timeoutMs, TimeUnit.MILLISECONDS)
+        return semaphore.tryAcquire(timeoutMs, TimeUnit.MILLISECONDS)
     }
 
     override fun releaseCore(count: Int) {

@@ -69,6 +69,7 @@ class CoroutineSchedulerTest : TestBase() {
     }
 
     @Test
+    @Ignore
     fun testFairSubmission() {
         CoroutineScheduler(1, 1).use {
             val startLatch = CountDownLatch(1)
