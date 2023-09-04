@@ -4,7 +4,7 @@
 
 package kotlinx.coroutines.scheduling
 
-// [TODO] Rewrite without monitors. For now produces little overhead
+// [TODO] Decide if use this instead of workers array. For now not.
 internal class WorkStealingQueueList {
     var queues = emptyArray<WorkStealingQueue?>()
 

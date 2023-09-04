@@ -19,6 +19,8 @@ import kotlin.jvm.internal.Ref.ObjectRef
 import kotlin.math.*
 import kotlin.random.Random
 
+// If enabled, scheduler will dynamically adjust the number of active worker threads based on
+// current throughput, trying to maximize it with minimum number of workers.
 internal const val ENABLE_HILL_CLIMBING = true
 
 // Starvation detection is performed by GateThread twice per second, and tries to inject a thread
@@ -26,8 +28,7 @@ internal const val ENABLE_HILL_CLIMBING = true
 internal const val ENABLE_STARVATION_DETECTION = true
 
 // If enabled, tasks added to local queues will have to wait for a small period of time until they
-// can be stealable. Reduces contention when there are many quick tasks.
-// Does nothing if not using kotlin local queues
+// can be stealable. Does nothing if not using kotlin local queues.
 internal const val ENABLE_MIN_DELAY_UNTIL_STEALING = false
 
 // If set to true, there could be up to CPU-count active thread requests (entering ensureThreadRequested()).
@@ -46,7 +47,7 @@ internal const val USE_DOTNET_QUEUE_SPINLOCK = true
 
 // If true, uses custom .NET semaphore for managing number of active threads.
 // It uses JAVA semaphore under the hood but wraps it with larger logic of spin waiting.
-internal const val USE_DOTNET_SEMAPHORE = true
+internal const val USE_DOTNET_SEMAPHORE = false
 
 internal const val LOG_MAJOR_HC_ADJUSTMENTS = false
 
@@ -80,7 +81,7 @@ internal class CoroutineScheduler(
         private const val GATE_ACTIVITIES_PERIOD_MS = DelayHelper.GATE_ACTIVITIES_PERIOD_MS
         private const val DELAY_STEP_MS = 25L
         private const val MAX_DELAY_MS = 250L
-        private const val DISPATCH_QUANTUM_MS = 30L
+        private const val PROCESS_BATCH_QUANTUM_MS = 30L
 
         private const val PARKED = -1
         private const val CLAIMED = 0
@@ -97,7 +98,7 @@ internal class CoroutineScheduler(
         private const val MASK_THREADS_GOAL =       MASK_PROCESSING_WORK shl SHIFT_THREADS_GOAL
 
         // Used only for .NET semaphore
-        private const val SEMAPHORE_SPIN_COUNT = 70 / 2
+        private const val SEMAPHORE_SPIN_COUNT = 70
 
         internal const val MIN_SUPPORTED_POOL_SIZE = 1
         internal const val MAX_SUPPORTED_POOL_SIZE = (1 shl SHIFT_LENGTH) - 2
@@ -111,7 +112,6 @@ internal class CoroutineScheduler(
     private val _isTerminated = atomic(false)
     private val gateThreadRunningState = atomic(0)
     private val completionCount = atomic(0)
-    private val numBlockingTasks = atomic(0)
     private val createdWorkers = atomic(0)
     private val runGateThreadEvent = AutoResetEvent(true)
     private val delayEvent = AutoResetEvent(false)
@@ -119,19 +119,21 @@ internal class CoroutineScheduler(
     private val threadAdjustmentLock = ReentrantLock()
 
     private val semaphore = Semaphore(0)
-    private val semaphoreDotnet = LowLevelLifoSemaphore(0, MAX_SUPPORTED_POOL_SIZE, SEMAPHORE_SPIN_COUNT)
+    private val semaphoreDotnet = LowLevelLifoSemaphore(0, SEMAPHORE_SPIN_COUNT)
 
     private val hillClimber = HillClimbing(this)
 
     @Volatile private var lastDequeueTime = 0L
     @Volatile private var nextCompletedWorkRequestsTime = 0L
-    @Volatile private var priorCompletedWorkRequestTime = 0L
     @Volatile private var pendingBlockingAdjustment = PendingBlockingAdjustment.None
 
     private var currentSampleStartTime = 0L
     private var threadAdjustmentIntervalMs = 0
     private var priorCompletionCount = 0
     private var numThreadsAddedDueToBlocking = 0
+
+    // Number of blocking tasks that are currently being executed by workers.
+    private var numBlockingTasks = 0
 
     @JvmField
     val workers = ResizableAtomicArray<CoroutineScheduler.Worker>((corePoolSize + 1) * 2)
@@ -147,18 +149,20 @@ internal class CoroutineScheduler(
 
     val isTerminated: Boolean inline get() = _isTerminated.value
 
+    // Use only when threadAdjustmentLock is held.
     val minThreadsGoal: Int
         inline get() {
-            return min(getNumThreadsGoal(threadCounts.get()), targetThreadsForBlockingAdjustment)
+            return min(getNumThreadsGoal(), targetThreadsForBlockingAdjustment)
         }
 
+    // Returns required number of threads to run, taking into account number of blocking tasks being currently executed.
+    // Needs to be used only when threadAdjustmentLock is held.
     private val targetThreadsForBlockingAdjustment: Int
         inline get() {
-            val numBlocking: Int = numBlockingTasks.value
-            return if (numBlockingTasks.value <= 0) {
+            return if (numBlockingTasks <= 0) {
                 corePoolSize
             } else {
-                min(corePoolSize + numBlocking, maxPoolSize)
+                min(corePoolSize + numBlockingTasks, maxPoolSize)
             }
         }
 
@@ -201,17 +205,21 @@ internal class CoroutineScheduler(
     fun dispatch(block: Runnable, taskContext: TaskContext = NonBlockingContext, tailDispatch: Boolean = false) {
         trackTask()
         val task = createTask(block, taskContext)
-        enqueue(task, tailDispatch)
+        val currentWorker = currentWorker()
+        val notAdded = currentWorker.submitToLocalQueue(task, tailDispatch)
+        if (notAdded != null) {
+            if (!addToGlobalQueue(notAdded)) {
+                throw RejectedExecutionException("$schedulerName was terminated")
+            }
+        }
+
+        ensureThreadRequested()
     }
 
     fun createTask(block: Runnable, taskContext: TaskContext): Task {
         val nanoTime = schedulerTimeSource.nanoTime()
         if (block is Task) {
-            block.submissionTime = if (ENABLE_MIN_DELAY_UNTIL_STEALING) {
-                nanoTime
-            } else {
-                0
-            }
+            block.submissionTime = nanoTime
             block.taskContext = taskContext
             return block
         }
@@ -256,22 +264,10 @@ internal class CoroutineScheduler(
         }
     }
 
-    private fun enqueue(task: Task, tailDispatch: Boolean) {
-        val currentWorker = currentWorker()
-        val notAdded = currentWorker.submitToLocalQueue(task, tailDispatch)
-        if (notAdded != null) {
-            if (!addToGlobalQueue(notAdded)) {
-                throw RejectedExecutionException("$schedulerName was terminated")
-            }
-        }
-        ensureThreadRequested()
-    }
-
     private fun Worker?.submitToLocalQueue(task: Task, tailDispatch: Boolean): Task? {
         if (this == null) return task
         if (task.isBlocking) return task
         if (isTerminated) return task
-        mayHaveLocalTasks = true
 
         return if (USE_KOTLIN_LOCAL_QUEUES) {
             localQueue.add(task, fair = tailDispatch)
@@ -290,8 +286,10 @@ internal class CoroutineScheduler(
         }
     }
 
+    // Requests for a thread to process work. Restricts number of concurrent request, to avoid over-parallelization.
     private fun ensureThreadRequested() {
         if (ENABLE_CONCURRENT_THREAD_REQUESTS) {
+            // Restricts the number of requests to number of available processors at a time.
             var count = numOutstandingThreadRequests.value
             while (count < AVAILABLE_PROCESSORS) {
                 val prev = numOutstandingThreadRequests.compareAndExchange(count, count + 1)
@@ -302,12 +300,14 @@ internal class CoroutineScheduler(
                 count = prev
             }
         } else {
+            // Restricts the number of requests to 1 at a time.
             if (numOutstandingThreadRequests.compareAndSet(0, 1)) {
                 requestWorker()
             }
         }
     }
 
+    // Notifies that a thread request has been satisfied, and allows another requests to be processed.
     private fun markThreadRequestSatisfied() {
         if (ENABLE_CONCURRENT_THREAD_REQUESTS) {
             var count = numOutstandingThreadRequests.value
@@ -319,7 +319,7 @@ internal class CoroutineScheduler(
                 count = prev
             }
         } else {
-            numOutstandingThreadRequests.getAndSet(0)
+            numOutstandingThreadRequests.set(0)
         }
 
     }
@@ -371,7 +371,6 @@ internal class CoroutineScheduler(
 
                 priorCompletionCount = totalNumCompletions
                 nextCompletedWorkRequestsTime = currentTicks + threadAdjustmentIntervalMs
-                priorCompletedWorkRequestTime = currentTicks
                 currentSampleStartTime = currentTicks
             }
         } finally {
@@ -413,7 +412,7 @@ internal class CoroutineScheduler(
             val oldCounts = threadCounts.compareAndExchange(counts, newCounts)
 
             if (oldCounts == counts) {
-                // CAS finished successfully, we can finish
+                // CAS finished successfully, we can finish.
                 break
             }
 
@@ -445,8 +444,12 @@ internal class CoroutineScheduler(
         worker.start()
     }
 
+    // Reduce the number of working workers by one, but maybe add back a worker (possibly this thread)
+    // if a thread request comes in while we are marking this thread as not working.
     private fun removeWorkingWorker() {
         var counts = threadCounts.get()
+
+        // [TODO] Verify if atomic decrement is sufficient.
         while (true) {
             val newCounts = decrementNumProcessingWork(counts)
             val countsBeforeUpdate = threadCounts.compareAndExchange(counts, newCounts)
@@ -456,6 +459,10 @@ internal class CoroutineScheduler(
             counts = countsBeforeUpdate
         }
 
+        // It's possible that we decided we had thread requests just before a request came in,
+        // but reduced the worker count *after* the request came in.  In this case, we might
+        // miss the notification of a thread request. So we wake up a thread (maybe this one!)
+        // if there is work to do.
         if (numRequestedWorkers.value > 0) {
             maybeAddWorker()
         }
@@ -587,11 +594,14 @@ internal class CoroutineScheduler(
         return delay > minimumDelay
     }
 
+    // Notifies scheduler that a thread starts executing blocking task, which means that
+    // additional workers might be required.
     private fun notifyThreadBlocked() {
         var shouldWakeGateThread = false
-        numBlockingTasks.incrementAndGet()
+
         threadAdjustmentLock.withLock {
-            require(numBlockingTasks.value > 0)
+            numBlockingTasks++
+            require(numBlockingTasks > 0)
 
             if (pendingBlockingAdjustment != PendingBlockingAdjustment.WithDelayIfNecessary &&
                 getNumThreadsGoal() < targetThreadsForBlockingAdjustment) {
@@ -611,8 +621,11 @@ internal class CoroutineScheduler(
 
     private fun notifyThreadUnblocked() {
         var shouldWakeGateThread = false
-        numBlockingTasks.decrementAndGet()
+
         threadAdjustmentLock.withLock {
+            require(numBlockingTasks > 0)
+            numBlockingTasks--
+
             if (pendingBlockingAdjustment != PendingBlockingAdjustment.Immediately &&
                 numThreadsAddedDueToBlocking > 0 &&
                 getNumThreadsGoal() > targetThreadsForBlockingAdjustment) {
@@ -627,6 +640,7 @@ internal class CoroutineScheduler(
         }
     }
 
+    // Increases the number of workers that are allowed to work concurrently.
     private fun releasePermits(permits: Int) {
         if (USE_DOTNET_SEMAPHORE) {
             semaphoreDotnet.release(permits)
@@ -669,16 +683,12 @@ internal class CoroutineScheduler(
         @JvmField
         val localQueue: WorkQueue = WorkQueue()
 
-        @JvmField
-        var mayHaveLocalTasks = false
-
         val workerCtl = atomic(CLAIMED)
 
         private val stolenTask: ObjectRef<Task?> = ObjectRef()
         private var rngState = Random.nextInt()
-        private var terminationDeadline = 0L
-        private var acquireTimedOut = false
         private var minDelayUntilStealableTasksNs = 0L
+        private var shouldSpinWait = true
 
         inline val scheduler get() = this@CoroutineScheduler
 
@@ -686,8 +696,9 @@ internal class CoroutineScheduler(
 
         private fun runWorker() {
             while (!isTerminated) {
+                shouldSpinWait = true
                 while (!isTerminated) {
-                    if (tryAcquirePermit()) {
+                    if (tryAcquirePermit(shouldSpinWait)) {
                         doWork()
                     } else {
                         break
@@ -702,30 +713,39 @@ internal class CoroutineScheduler(
 
         private fun doWork() {
             var alreadyRemovedWorkingWorker = false
+
             while (takeActiveRequest()) {
                 if (ENABLE_STARVATION_DETECTION) {
                     lastDequeueTime = System.currentTimeMillis()
                 }
-                if (!dispatchFromQueue()) {
+
+                if (!processBatchOfWork()) {
+                    // ShouldStopProcessingWorkNow() caused the thread to stop processing work, and it would have
+                    // already removed this worker in the counts. This typically happens when hill climbing
+                    // decreases the worker thread count goal.
                     alreadyRemovedWorkingWorker = true
                     break
-                } else {
-                    mayHaveLocalTasks = false
-                    if (minDelayUntilStealableTasksNs != 0L) {
-                        interrupted()
-                        LockSupport.parkNanos(minDelayUntilStealableTasksNs)
-                        minDelayUntilStealableTasksNs = 0L
-                    }
                 }
 
                 if (numRequestedWorkers.value <= 0) {
                     break
                 }
 
+                // In cases with short bursts of work, worker threads are being released and entering processBatchOfWork
+                // very quickly, not finding much work, and soon afterward going back, causing extra thrashing on
+                // data and some atomic operations, and similarly when the scheduler runs out of work. Since
+                // there is a pending request for work, introduce a slight delay before serving the next request.
                 yield()
             }
 
+            // Don't spin-wait on the semaphore next time if the thread was actively stopped from processing work,
+            // as it's unlikely that the worker thread count goal would be increased again so soon afterward that
+            // the semaphore would be released within the spin-wait window.
+            shouldSpinWait = !alreadyRemovedWorkingWorker
+
             if (!alreadyRemovedWorkingWorker) {
+                // If we woke up but couldn't find a request, or ran out of work items to process, we need to update
+                // the number of working workers to reflect that we are done working for now.
                 removeWorkingWorker()
             }
         }
@@ -745,9 +765,16 @@ internal class CoroutineScheduler(
             }
         }
 
+        // Returns if the current thread should stop processing work for the scheduler.
+        // A thread should stop processing work when work remains only when
+        // there are more worker threads in the scheduler than we currently want.
         private fun shouldStopProcessingWorkNow(): Boolean {
             var counts = threadCounts.get()
             while (true) {
+                // When there are more threads processing work than the thread count goal, it may have been decided
+                // to decrease the number of threads. Stop processing if the counts can be updated. We may have more
+                // threads existing than the thread count goal and that is ok, the cold ones will eventually time out if
+                // the thread count goal is not increased again.
                 if (getNumProcessingWork(counts) <= getNumThreadsGoal(counts)) {
                     return false
                 }
@@ -773,17 +800,8 @@ internal class CoroutineScheduler(
                 return false
             }
 
-            // [TODO] Is here subtracting by prior time needed?
-            // Explanation is that C# Environment.TickCount can wrap around,
-            // maybe there is no need in Kotlin
-            val priorTime = priorCompletedWorkRequestTime
-            val requiredInterval = nextCompletedWorkRequestsTime - priorTime
-            val elapsedInterval = currentTimeMs - priorTime
-
-            require(requiredInterval >= 0)
-            require(elapsedInterval >= 0)
-
-            if (elapsedInterval < requiredInterval) {
+            // Not enough time passed
+            if (currentTimeMs < nextCompletedWorkRequestsTime) {
                 return false
             }
 
@@ -801,16 +819,17 @@ internal class CoroutineScheduler(
             return pendingBlockingAdjustment == PendingBlockingAdjustment.None
         }
 
-        private fun tryAcquirePermit(): Boolean {
-            if (USE_DOTNET_SEMAPHORE) {
-                return semaphoreDotnet.wait(idleWorkerKeepAliveNs / 1_000_000, true)
-            } else {
-                return try {
+        // Acquires permit, thus being able to process work.
+        private fun tryAcquirePermit(spinWait: Boolean): Boolean {
+            return try {
+                if (USE_DOTNET_SEMAPHORE) {
+                    semaphoreDotnet.wait(idleWorkerKeepAliveNs / 1_000_000, spinWait)
+                } else {
                     semaphore.tryAcquire(idleWorkerKeepAliveNs, TimeUnit.NANOSECONDS)
-                } catch (e: InterruptedException) {
-                    this.interrupt()
-                    false
                 }
+            } catch (e: InterruptedException) {
+                this.interrupt()
+                false
             }
         }
 
@@ -822,34 +841,53 @@ internal class CoroutineScheduler(
             }
         }
 
-        private fun findTask(scanLocalQueue: Boolean): Task? {
-            if (scanLocalQueue) {
-                val globalFirst = nextInt(2 * corePoolSize) == 0
-                if (globalFirst) pollGlobalQueues()?.let { return it }
-                pollLocalQueue()?.let { return it }
-                if (!globalFirst) pollGlobalQueues()?.let { return it }
-            } else {
-                pollGlobalQueues()?.let { return it }
+        // Transfer all the work to global queue. It's useful when the thread is finishing dispatching early,
+        // with more work in its local queue.
+        private fun transferLocalWork() {
+            while (true) {
+                val task = pollLocalQueue() ?: break
+                addToGlobalQueue(task)
             }
+        }
+
+        private fun findTask(): Task? {
+            val globalFirst = nextInt(2 * corePoolSize) == 0
+
+            if (globalFirst) pollGlobalQueues()?.let { return it }
+            pollLocalQueue()?.let { return it }
+            if (!globalFirst) pollGlobalQueues()?.let { return it }
 
             val missedSteal = ObjectRef<Boolean>()
             missedSteal.element = false
 
             val result = trySteal()
 
+            // No work.
+            // If we missed a steal, though, there may be more work in the queue.
+            // Instead of looping around and trying again, we'll just request another thread. Hopefully the thread
+            // that owns the contended queue will pick up its own tasks in the meantime,
+            // which will be more efficient than this thread doing it anyway.
             if (result.isFailure) {
-                // We missed steal, there may be work to do.
                 ensureThreadRequested()
             }
 
             return result.getOrNull()
         }
 
+        // Invoked when the thread's wait timed out. We are potentially shutting down this thread.
+        // We are going to decrement the number of existing threads to no longer include this one
+        // and then change the max number of threads in the thread pool to reflect that we don't need as many
+        // as we had. Finally, we are going to tell hill climbing that we changed the max number of threads.
         private fun shouldExitWorker(): Boolean {
-            threadAdjustmentLock.withLock {
+            threadAdjustmentLock.lock()
+            try {
                 var counts = threadCounts.get()
                 while (true) {
+                    // Since this thread is currently registered as an existing thread, if more work comes in meanwhile,
+                    // this thread would be expected to satisfy the new work. Ensure that numExistingThreads is not
+                    // decreased below numProcessingWork, as that would be indicative of such a case.
                     if (getNumExistingThreads(counts) <= getNumProcessingWork(counts)) {
+                        // In this case, enough work came in that this thread should not time out and should go back to work.
                         return false
                     }
 
@@ -866,14 +904,10 @@ internal class CoroutineScheduler(
                     }
 
                     counts = oldCounts
-
-                    // [TODO] Remove this, doesn't compile without it
-                    require(counts == oldCounts)
                 }
+            } finally {
+                threadAdjustmentLock.unlock()
             }
-
-            // [TODO] Remove this, doesn't compile without it
-            return false
         }
 
         private fun tryTerminateWorker() {
@@ -895,11 +929,6 @@ internal class CoroutineScheduler(
             }
         }
 
-        private fun idleReset() {
-            terminationDeadline = 0L
-            acquireTimedOut = false
-        }
-
         fun nextInt(upperBound: Int): Int {
             var r = rngState
             r = r xor (r shl 13)
@@ -913,17 +942,37 @@ internal class CoroutineScheduler(
             }
             return (r and Int.MAX_VALUE) % upperBound
         }
-
-        private fun dispatchFromQueue(): Boolean {
+        
+        // Returns true if this thread did as much work as was available or its quantum has expired.
+        // Returns false if this thread has stopped early.
+        private fun processBatchOfWork(): Boolean {
+            // Before dequeue of the first work item, acknowledge that the thread request has been satisfied.
             markThreadRequestSatisfied()
 
             var startTickCount = System.currentTimeMillis()
             var firstLoop = true
 
+            // Loop until our quantum expires or there is no work.
             while (true) {
-                val workItem = findTask(mayHaveLocalTasks) ?: return true
+                val workItem = findTask() ?:
+                    if (ENABLE_MIN_DELAY_UNTIL_STEALING && minDelayUntilStealableTasksNs != 0L) {
+                        // We didn't take any tasks, but there are some to be stolen in near future.
+                        // Instead of returning, we can wait and try again after a small period of time.
+                        interrupted()
+                        LockSupport.parkNanos(minDelayUntilStealableTasksNs)
+                        minDelayUntilStealableTasksNs = 0L
+                        continue
+                    } else {
+                        // There are no tasks to process, return normally.
+                        return true
+                    }
 
                 if (firstLoop) {
+                    // A task was successfully dequeued, and there may be more tasks to process. Request a thread to
+                    // parallelize processing of tasks, before processing more. Following this, it is the
+                    // responsibility of the new thread and other enqueuing work to request more threads as necessary.
+                    // The parallelization may be necessary here for correctness if the task blocks for some
+                    // reason that may have a dependency on other queued tasks.
                     ensureThreadRequested()
                     firstLoop = false
                 }
@@ -931,15 +980,23 @@ internal class CoroutineScheduler(
                 minDelayUntilStealableTasksNs = 0L
                 executeWorkItem(workItem)
 
+                // Notify the scheduler that we executed this task. This is also our opportunity to ask
+                // whether Hill Climbing wants us to return the thread to the pool or not.
                 val currentTickCount = System.currentTimeMillis()
                 if (!notifyWorkItemComplete(currentTickCount)) {
+                    // This thread is being parked and may remain inactive for a while. Transfer any thread-local work items
+                    // to ensure that they would not be heavily delayed. Tell the caller that this thread was requested to stop
+                    // processing work items.
+                    transferLocalWork()
                     return false
                 }
 
-                if (currentTickCount - startTickCount < DISPATCH_QUANTUM_MS) {
+                // Check if the dispatch quantum has expired
+                if (currentTickCount - startTickCount < PROCESS_BATCH_QUANTUM_MS) {
                     continue
                 }
 
+                // This method will continue to dispatch work items. Refresh the start tick count for the next dispatch quantum.
                 startTickCount = currentTickCount
             }
         }
@@ -1002,7 +1059,6 @@ internal class CoroutineScheduler(
         }
 
         private fun executeWorkItem(workItem: Task) {
-            idleReset()
             beforeTask(workItem.mode)
             runSafely(workItem)
             afterTask(workItem.mode)

@@ -8,21 +8,18 @@ import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
-// [TODO] Take care of overflows and sign
-// [TODO] Check for optimal spinCount (maybe *2 like in C# CORECLR && UNIX)
+// [TODO] Take care of overflows and signs.
+// [TODO] Check for optimal spinCount.
 
 @Suppress("NOTHING_TO_INLINE")
 internal abstract class LowLevelLifoSemaphoreBase(
     protected val initialSignalCount: Int,
-    protected val maximumSignalCount: Int,
     protected val spinCount: Int
 ) {
     val data = AtomicLong(0L)
 
     init {
         require(initialSignalCount >= 0)
-        require(initialSignalCount <= maximumSignalCount)
-        require(maximumSignalCount > 0)
         require(spinCount >= 0)
 
         data.set(data.get().setSignalCount(initialSignalCount))
@@ -96,86 +93,10 @@ internal abstract class LowLevelLifoSemaphoreBase(
 
     // ===============================================
 
-    fun testCounts() {
-        var signalCount = 0
-        var waiterCount = 0
-        var spinnerCount = 0
-        var signaledToWakeCount = 0
-
-        var state = 0L
-
-        val iterations = 100_000_000
-        val bound = 100
-
-        for (i in 1..iterations) {
-            val value = Random.nextInt(bound)
-            when (Random.nextInt(12)) {
-                0 -> { // setSignalCount
-                    signalCount = value
-                    state = state.setSignalCount(value)
-                }
-                1 -> { // setWaiterCount
-                    waiterCount = value
-                    state = state.setWaiterCount(value)
-                }
-                2 -> { // setSpinnerCount
-                    spinnerCount = value
-                    state = state.setSpinnerCount(value)
-                }
-                3 -> { // setSignaledToWakeCount
-                    signaledToWakeCount = value
-                    state = state.setSignaledToWakeCount(value)
-                }
-                4 -> { // addSignalCount
-                    signalCount += value
-                    state = state.addSignalCount(value)
-                }
-                5 -> { // incrementSignalCount
-                    signalCount++
-                    state = state.incrementSignalCount()
-                }
-                6 -> { // decrementSignalCount
-                    if (signalCount == 0) continue
-                    signalCount--
-                    state = state.decrementSignalCount()
-                }
-                7 -> { // incrementWaiterCount
-                    waiterCount++
-                    state = state.incrementWaiterCount()
-                }
-                8 -> { // decrementWaiterCount
-                    if (waiterCount == 0) continue
-                    waiterCount--
-                    state = state.decrementWaiterCount()
-                }
-                9 -> { // incrementSpinnerCount
-                    spinnerCount++
-                    state = state.incrementSpinnerCount()
-                }
-                10 -> { // decrementSpinnerCount
-                    if (spinnerCount == 0) continue
-                    spinnerCount--
-                    state = state.decrementSpinnerCount()
-                }
-                11 -> { // decrementSignaledToWakeCount
-                    if (signaledToWakeCount == 0) continue
-                    signaledToWakeCount--
-                    state = state.decrementSignaledToWakeCount()
-                }
-            }
-
-            require(signalCount == state.signalCount)
-            require(waiterCount == state.waiterCount)
-            require(spinnerCount == state.spinnerCount)
-            require(signaledToWakeCount == state.signaledToWakeCount)
-        }
-    }
-
     protected abstract fun releaseCore(count: Int)
 
     fun release(releaseCount: Int) {
         require(releaseCount > 0)
-        require(releaseCount <= maximumSignalCount)
 
         var counts = data.get()
 
@@ -196,8 +117,6 @@ internal abstract class LowLevelLifoSemaphoreBase(
 
             val oldCounts = data.compareAndExchange(counts, newCounts)
             if (oldCounts == counts) {
-                require(releaseCount <= maximumSignalCount - counts.signalCount)
-
                 if (countOfWaitersToWake > 0) {
                     releaseCore(countOfWaitersToWake)
                 }
@@ -212,9 +131,8 @@ internal abstract class LowLevelLifoSemaphoreBase(
 
 internal class LowLevelLifoSemaphore(
     initialSignalCount: Int,
-    maximumSignalCount: Int,
     spinCount: Int
-) : LowLevelLifoSemaphoreBase(initialSignalCount, maximumSignalCount, spinCount) {
+) : LowLevelLifoSemaphoreBase(initialSignalCount, spinCount) {
     companion object {
         private const val SPIN_YIELD_THRESHOLD = 10
         private const val SPIN_WAITS_PER_ITERATION = 1024
@@ -248,8 +166,6 @@ internal class LowLevelLifoSemaphore(
         var counts = data.get()
 
         while (true) {
-            require(counts.signalCount <= maximumSignalCount)
-
             var newCounts = counts
             if (counts.signalCount != 0) {
                 newCounts = newCounts.decrementSignalCount()
