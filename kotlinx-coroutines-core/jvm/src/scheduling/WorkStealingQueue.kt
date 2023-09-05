@@ -4,22 +4,22 @@
 
 package kotlinx.coroutines.scheduling
 
+import kotlinx.atomicfu.*
 import kotlinx.coroutines.channels.*
 import kotlinx.coroutines.internal.ReentrantLock
-import java.util.concurrent.atomic.*
 
 internal class Spinlock {
-    private val flag = AtomicInteger(0)
+    private val flag = atomic(false)
     fun lock() {
-        while (!flag.compareAndSet(0, 1)) {}
+        while (!flag.compareAndSet(false, true)) {}
     }
 
     fun tryLock(): Boolean {
-        return flag.compareAndSet(0, 1)
+        return flag.compareAndSet(false, true)
     }
 
     fun unlock() {
-        flag.set(0)
+        flag.value = false
     }
 }
 
@@ -36,7 +36,7 @@ internal class WorkStealingQueue {
         private const val INITIAL_SIZE = 32
     }
 
-    @Volatile var array = AtomicReferenceArray(arrayOfNulls<Task?>(INITIAL_SIZE))
+    @Volatile var array = arrayOfNulls<Task?>(INITIAL_SIZE)
 
     @Volatile private var mask = INITIAL_SIZE - 1
     @Volatile private var headIndex = 0
@@ -72,7 +72,7 @@ internal class WorkStealingQueue {
         if (tail < headIndex + mask) {
             // This means that there are at least 2 free elements in array,
             // so we can add new task without resizing.
-            array.set(tail and mask, task)
+            array[tail and mask] = task
             tailIndex = tail + 1
             return
         }
@@ -86,9 +86,10 @@ internal class WorkStealingQueue {
 
             if (count >= mask) {
                 // There is no space left, resize array.
-                val newArray = AtomicReferenceArray(arrayOfNulls<Task?>(array.length() * 2))
-                for (i in 0 until array.length()) {
-                    newArray[i] = array.get((i + head) and mask)
+
+                val newArray = arrayOfNulls<Task?>(array.size * 2)
+                for (i in 0 until array.size) {
+                    newArray[i] = array[(i + head) and mask]
                 }
 
                 array = newArray
@@ -99,7 +100,7 @@ internal class WorkStealingQueue {
             }
 
             // Finally, add element.
-            array.set(tail and mask, task)
+            array[tail and mask] = task
             tailIndex = tail + 1
         } finally {
             mutex.unlock()
@@ -119,23 +120,24 @@ internal class WorkStealingQueue {
             tailIndex = tail
 
             if (headIndex <= tail) {
-                // At this point we should know that stealing will not interfere
-                // and can retrieve element without taking lock.
+                // No race should be possible. We can retrieve stolen element.
                 val idx = tail and mask
-                val task = array.get(idx) ?: continue
-                array.set(idx, null)
+                val task = array[idx]
+                require(task != null)
+                array[idx] = null
                 return task
             }
 
             try {
-                // We may be racing with stealing, need to synchronize with a lock.
+                // We may be racing with stealing: 0 or 1 element left
                 mutex.lock()
 
                 if (headIndex <= tail) {
                     // We won a race and can retrieve element
                     val idx = tail and mask
-                    val task = array.get(idx) ?: continue
-                    array.set(idx, null)
+                    val task = array[idx]
+                    require(task != null)
+                    array[idx] = null
                     return task
                 }
 
@@ -171,8 +173,9 @@ internal class WorkStealingQueue {
                 if (head < tailIndex) {
                     // No race should be possible. We can retrieve stolen element.
                     val idx = head and mask
-                    val task = array.get(idx) ?: continue
-                    array.set(idx, null)
+                    val task = array[idx]
+                    require(task != null)
+                    array[idx] = null
                     return ChannelResult.success(task)
                 }
 

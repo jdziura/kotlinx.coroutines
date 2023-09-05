@@ -12,8 +12,6 @@ import kotlinx.coroutines.internal.ReentrantLock
 import java.io.*
 import java.lang.Runnable
 import java.util.concurrent.*
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.LockSupport
 import kotlin.jvm.internal.Ref.ObjectRef
 import kotlin.math.*
@@ -21,11 +19,11 @@ import kotlin.random.Random
 
 // If enabled, scheduler will dynamically adjust the number of active worker threads based on
 // current throughput, trying to maximize it with minimum number of workers.
-internal const val ENABLE_HILL_CLIMBING = true
+internal const val ENABLE_HILL_CLIMBING = false
 
 // If enabled, GateThread will try to inject a thread twice per second
 // if no work has been done for this time.
-internal const val ENABLE_STARVATION_DETECTION = true
+internal const val ENABLE_STARVATION_DETECTION = false
 
 // If enabled, tasks added to local queues will have to wait for a small period of time until they
 // can be stealable. Works only for kotlin queues.
@@ -36,18 +34,18 @@ internal const val ENABLE_MIN_DELAY_UNTIL_STEALING = false
 internal const val ENABLE_CONCURRENT_THREAD_REQUESTS = false
 
 // If false, will use ported .NET implementation
-internal const val USE_KOTLIN_LOCAL_QUEUES = false
+internal const val USE_KOTLIN_LOCAL_QUEUES = true
 
 // If false, will use JAVA ConcurrentLinkedQueue
-internal const val USE_KOTLIN_GLOBAL_QUEUE = false
+internal const val USE_KOTLIN_GLOBAL_QUEUE = true
 
 // If true, uses simple spinlock inside local queues for local queues.
 // Otherwise, uses reentrant lock.
-internal const val USE_DOTNET_QUEUE_SPINLOCK = true
+internal const val USE_DOTNET_QUEUE_SPINLOCK = false
 
 // If true, uses custom .NET semaphore for managing number of active threads.
 // It uses JAVA semaphore under the hood but wraps it with larger logic of spin waiting.
-internal const val USE_DOTNET_SEMAPHORE = false
+internal const val USE_DOTNET_SEMAPHORE = true
 
 internal const val LOG_MAJOR_HC_ADJUSTMENTS = false
 
@@ -95,7 +93,7 @@ internal class CoroutineScheduler(
         private const val MASK_THREADS_GOAL =       MASK_PROCESSING_WORK shl SHIFT_THREADS_GOAL
 
         // Used only for .NET semaphore
-        private const val SEMAPHORE_SPIN_COUNT = 70
+        private const val SEMAPHORE_SPIN_COUNT = 16
 
         internal const val MIN_SUPPORTED_POOL_SIZE = 1
         internal const val MAX_SUPPORTED_POOL_SIZE = (1 shl SHIFT_LENGTH) - 2
@@ -103,8 +101,9 @@ internal class CoroutineScheduler(
 
     private val threadsToAddWithoutDelay = AVAILABLE_PROCESSORS
     private val threadsPerDelayStep = AVAILABLE_PROCESSORS
-    private val threadCounts = AtomicLong(0L.setNumThreadsGoal(corePoolSize))
-    private val numOutstandingThreadRequests = AtomicInteger(0)
+    private val startingThreadCountsValue = 0L.setNumThreadsGoal(corePoolSize)
+    private val threadCounts = atomic(startingThreadCountsValue)
+    private val numOutstandingThreadRequests = atomic(0)
     private val numRequestedWorkers = atomic(0)
     private val _isTerminated = atomic(false)
     private val gateThreadRunningState = atomic(0)
@@ -179,11 +178,11 @@ internal class CoroutineScheduler(
         inline get() = getValue(MASK_THREADS_GOAL, SHIFT_THREADS_GOAL)
 
     private val numProcessingWork
-        inline get() = threadCounts.get().numProcessingWork
+        inline get() = threadCounts.value.numProcessingWork
     private val numExistingThreads
-        inline get() = threadCounts.get().numExistingThreads
+        inline get() = threadCounts.value.numExistingThreads
     private val numThreadsGoal
-        inline get() = threadCounts.get().numThreadsGoal
+        inline get() = threadCounts.value.numThreadsGoal
 
     private inline fun Long.setNumProcessingWork(value: Int) =
         setValue(value, MASK_PROCESSING_WORK, SHIFT_PROCESSING_WORK)
@@ -198,14 +197,12 @@ internal class CoroutineScheduler(
         this - (1L shl SHIFT_EXISTING_THREADS)
 
     private fun interlockedSetNumThreadsGoal(value: Int): Long {
-        var counts = threadCounts.get()
         while (true) {
+            val counts = threadCounts.value
             val newCounts = counts.setNumThreadsGoal(value)
-            val countsBeforeUpdate = threadCounts.compareAndExchange(counts, newCounts)
-            if (countsBeforeUpdate == counts) {
+            if (threadCounts.compareAndSet(counts, newCounts)) {
                 return newCounts
             }
-            counts = countsBeforeUpdate
         }
     }
 
@@ -286,6 +283,7 @@ internal class CoroutineScheduler(
         }
     }
 
+
     private fun addToGlobalQueue(task: Task): Boolean {
         return if (USE_KOTLIN_GLOBAL_QUEUE) {
             globalQueue.addLast(task)
@@ -299,14 +297,16 @@ internal class CoroutineScheduler(
     private fun ensureThreadRequested() {
         if (ENABLE_CONCURRENT_THREAD_REQUESTS) {
             // Restricts the number of requests to number of available processors at a time.
-            var count = numOutstandingThreadRequests.value
-            while (count < AVAILABLE_PROCESSORS) {
-                val prev = numOutstandingThreadRequests.compareAndExchange(count, count + 1)
-                if (prev == count) {
+            while (true) {
+                val count = numOutstandingThreadRequests.value
+                if (count < AVAILABLE_PROCESSORS) {
+                    break
+                }
+                val newCount = count + 1
+                if (numOutstandingThreadRequests.compareAndSet(count, newCount)) {
                     requestWorker()
                     break
                 }
-                count = prev
             }
         } else {
             // Restricts the number of requests to 1 at a time.
@@ -319,16 +319,18 @@ internal class CoroutineScheduler(
     // Notifies that a thread request has been satisfied, and allows another requests to be processed.
     private fun markThreadRequestSatisfied() {
         if (ENABLE_CONCURRENT_THREAD_REQUESTS) {
-            var count = numOutstandingThreadRequests.value
-            while (count > 0) {
-                val prev = numOutstandingThreadRequests.compareAndExchange(count, count - 1)
-                if (prev == count) {
+            while (true) {
+                val count = numOutstandingThreadRequests.value
+                if (count <= 0) {
                     break
                 }
-                count = prev
+                val newCount = count - 1
+                if (numOutstandingThreadRequests.compareAndSet(count, newCount)) {
+                    break
+                }
             }
         } else {
-            numOutstandingThreadRequests.set(0)
+            numOutstandingThreadRequests.value = 0
         }
 
     }
@@ -351,7 +353,7 @@ internal class CoroutineScheduler(
         var addWorker = false
 
         try {
-            val counts = threadCounts.get()
+            val counts = threadCounts.value
             if (counts.numProcessingWork > counts.numThreadsGoal ||
                 pendingBlockingAdjustment != PendingBlockingAdjustment.None) {
                 return
@@ -394,14 +396,13 @@ internal class CoroutineScheduler(
     // This is the main function that manages actual number of working/created threads
     // based on current goal and potential blocked threads.
     private fun maybeAddWorker() {
-        var counts = threadCounts.get()
-
         var numExistingThreads: Int
         var numProcessingWork: Int
         var newNumExistingThreads: Int
         var newNumProcessingWork: Int
 
         while (true) {
+            val counts = threadCounts.value
             numProcessingWork = counts.numProcessingWork
             if (numProcessingWork >= counts.numThreadsGoal) {
                 // Already enough workers, return.
@@ -418,21 +419,16 @@ internal class CoroutineScheduler(
             newCounts = newCounts.setNumProcessingWork(newNumProcessingWork)
             newCounts = newCounts.setNumExistingThreads(newNumExistingThreads)
 
-            val oldCounts = threadCounts.compareAndExchange(counts, newCounts)
-
-            if (oldCounts == counts) {
-                // CAS finished successfully, we can finish.
+            if (threadCounts.compareAndSet(counts, newCounts)) {
                 break
             }
-
-            // We lost a race, try again.
-            counts = oldCounts
         }
 
         val toCreate = newNumExistingThreads - numExistingThreads
         val toRelease = newNumProcessingWork - numProcessingWork
 
         if (toRelease > 0) {
+            require(toRelease == 1)
             releasePermits(toRelease)
         }
 
@@ -456,16 +452,13 @@ internal class CoroutineScheduler(
     // Reduce the number of working workers by one, but maybe add back a worker (possibly this thread)
     // if a thread request comes in while we are marking this thread as not working.
     private fun removeWorkingWorker() {
-        var counts = threadCounts.get()
-
-        // [TODO] Verify if atomic decrement is sufficient.
+        // [TODO] Verify if atomic decrement would be better and sufficient.
         while (true) {
+            val counts = threadCounts.value
             val newCounts = counts.decrementNumProcessingWork()
-            val countsBeforeUpdate = threadCounts.compareAndExchange(counts, newCounts)
-            if (countsBeforeUpdate == counts) {
+            if (threadCounts.compareAndSet(counts, newCounts)) {
                 break
             }
-            counts = countsBeforeUpdate
         }
 
         // It's possible that we decided we had thread requests just before a request came in,
@@ -480,7 +473,8 @@ internal class CoroutineScheduler(
     private fun takeActiveRequest(): Boolean {
         var cnt = numRequestedWorkers.value
         while (cnt > 0) {
-            if (numRequestedWorkers.compareAndSet(cnt, cnt - 1)) {
+            val newCnt = cnt - 1
+            if (numRequestedWorkers.compareAndSet(cnt, newCnt)) {
                 return true
             }
             cnt = numRequestedWorkers.value
@@ -532,7 +526,7 @@ internal class CoroutineScheduler(
         pendingBlockingAdjustment = PendingBlockingAdjustment.None
         val targetThreadsGoal = targetThreadsForBlockingAdjustment
 
-        var counts = threadCounts.get()
+        var counts = threadCounts.value
         var numThreadsGoal = counts.numThreadsGoal
 
         if (numThreadsGoal == targetThreadsGoal) {
@@ -778,8 +772,8 @@ internal class CoroutineScheduler(
         // A thread should stop processing work when work remains only when
         // there are more worker threads in the scheduler than we currently want.
         private fun shouldStopProcessingWorkNow(): Boolean {
-            var counts = threadCounts.get()
             while (true) {
+                val counts = threadCounts.value
                 // When there are more threads processing work than the thread count goal, it may have been decided
                 // to decrease the number of threads. Stop processing if the counts can be updated. We may have more
                 // threads existing than the thread count goal and that is ok, the cold ones will eventually time out if
@@ -789,16 +783,9 @@ internal class CoroutineScheduler(
                 }
 
                 val newCounts = counts.decrementNumProcessingWork()
-                val oldCounts = threadCounts.compareAndExchange(counts, newCounts)
-
-                if (oldCounts == counts) {
+                if (threadCounts.compareAndSet(counts, newCounts)) {
                     return true
                 }
-
-                counts = oldCounts
-
-                // [TODO] Remove this, doesn't compile without it
-                require(counts == oldCounts)
             }
         }
 
@@ -818,7 +805,7 @@ internal class CoroutineScheduler(
             // more threads than the thread count goal. In that situation, hill climbing must have
             // previously decided to decrease the thread count goal, so we need to wait
             // until the system responds to that change before calling hill climbing again.
-            val counts = threadCounts.get()
+            val counts = threadCounts.value
             if (counts.numProcessingWork > counts.numThreadsGoal) {
                 return false
             }
@@ -830,9 +817,10 @@ internal class CoroutineScheduler(
 
         // Acquires permit, thus being able to process work.
         private fun tryAcquirePermit(spinWait: Boolean): Boolean {
+            if (spinWait != false) require(spinWait == true)
             return try {
                 if (USE_DOTNET_SEMAPHORE) {
-                    semaphoreDotnet.wait(idleWorkerKeepAliveNs / 1_000_000, spinWait)
+                    semaphoreDotnet.wait(idleWorkerKeepAliveNs / 1_000_000, true)
                 } else {
                     semaphore.tryAcquire(idleWorkerKeepAliveNs, TimeUnit.NANOSECONDS)
                 }
@@ -860,14 +848,8 @@ internal class CoroutineScheduler(
         }
 
         private fun findTask(): Task? {
-            val globalFirst = nextInt(2 * corePoolSize) == 0
-
-            if (globalFirst) pollGlobalQueues()?.let { return it }
             pollLocalQueue()?.let { return it }
-            if (!globalFirst) pollGlobalQueues()?.let { return it }
-
-            val missedSteal = ObjectRef<Boolean>()
-            missedSteal.element = false
+            pollGlobalQueues()?.let { return it }
 
             val result = trySteal()
 
@@ -890,8 +872,8 @@ internal class CoroutineScheduler(
         private fun shouldExitWorker(): Boolean {
             threadAdjustmentLock.lock()
             try {
-                var counts = threadCounts.get()
                 while (true) {
+                    val counts = threadCounts.value
                     // Since this thread is currently registered as an existing thread, if more work comes in meanwhile,
                     // this thread would be expected to satisfy the new work. Ensure that numExistingThreads is not
                     // decreased below numProcessingWork, as that would be indicative of such a case.
@@ -905,14 +887,10 @@ internal class CoroutineScheduler(
                     val newNumThreadsGoal = max(minThreadsGoal, min(newNumExistingThreads, counts.numThreadsGoal))
 
                     newCounts = newCounts.setNumThreadsGoal(newNumThreadsGoal)
-                    val oldCounts = threadCounts.compareAndExchange(counts, newCounts)
-
-                    if (oldCounts == counts) {
+                    if (threadCounts.compareAndSet(counts, newCounts)) {
                         hillClimber.forceChange(newNumThreadsGoal, HillClimbing.StateOrTransition.ThreadTimedOut)
                         return true
                     }
-
-                    counts = oldCounts
                 }
             } finally {
                 threadAdjustmentLock.unlock()
@@ -1028,10 +1006,12 @@ internal class CoroutineScheduler(
             var currentIndex = nextInt(created)
             var minDelay = Long.MAX_VALUE
             var missedSteal = false
+
             repeat(created) {
                 ++currentIndex
                 if (currentIndex > created) currentIndex = 1
                 val worker = workers[currentIndex]
+
                 if (worker !== null && worker !== this) {
                     if (USE_KOTLIN_LOCAL_QUEUES) {
                         val stealResult = worker.localQueue.trySteal(stealingMode, stolenTask)
@@ -1054,7 +1034,6 @@ internal class CoroutineScheduler(
                         } else {
                             result.getOrNull()?.let { return ChannelResult.success(it) }
                         }
-
                     }
                 }
             }
@@ -1129,21 +1108,20 @@ internal class CoroutineScheduler(
 
                         var addWorker = false
                         threadAdjustmentLock.withLock {
-                            var counts = threadCounts.get()
-                            while (counts.numProcessingWork < maxPoolSize
-                                && counts.numProcessingWork >= counts.numThreadsGoal) {
+                            while (true) {
+                                val counts = threadCounts.value
+                                if (counts.numProcessingWork >= maxPoolSize || counts.numProcessingWork < counts.numThreadsGoal) {
+                                    break
+                                }
 
                                 val newNumThreadsGoal = counts.numProcessingWork + 1
                                 val newCounts = counts.setNumThreadsGoal(newNumThreadsGoal)
 
-                                val countsBeforeUpdate = threadCounts.compareAndExchange(counts, newCounts)
-                                if (countsBeforeUpdate == counts) {
+                                if (threadCounts.compareAndSet(counts, newCounts)) {
                                     hillClimber.forceChange(newNumThreadsGoal, HillClimbing.StateOrTransition.Starvation)
                                     addWorker = true
                                     break
                                 }
-
-                                counts = countsBeforeUpdate
                             }
                         }
 
