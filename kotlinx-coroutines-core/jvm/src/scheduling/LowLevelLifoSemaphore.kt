@@ -6,7 +6,6 @@ package kotlinx.coroutines.scheduling
 
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.random.Random
 
 // [TODO] Take care of overflows and signs.
 // [TODO] Check for optimal spinCount.
@@ -41,54 +40,54 @@ internal abstract class LowLevelLifoSemaphoreBase(
         const val MAX_SPINNER_COUNT = 255
     }
 
-    inline fun Long.getValue(mask: Long, shift: Int) =
+    protected inline fun Long.getValue(mask: Long, shift: Int) =
         ((this and mask) shr shift).toInt()
 
-    inline fun Long.setValue(value: Int, mask: Long, shift: Int) =
+    protected inline fun Long.setValue(value: Int, mask: Long, shift: Int) =
         (this and mask.inv()) or (value.toLong() shl shift)
 
-    val Long.signalCount
+    protected val Long.signalCount
         inline get() = getValue(SIGNAL_COUNT_MASK, SIGNAL_COUNT_SHIFT)
-    val Long.waiterCount
+    protected val Long.waiterCount
         inline get() = getValue(WAITER_COUNT_MASK, WAITER_COUNT_SHIFT)
-    val Long.spinnerCount
+    protected val Long.spinnerCount
         inline get() = getValue(SPINNER_COUNT_MASK, SPINNER_COUNT_SHIFT)
-    val Long.signaledToWakeCount
+    protected val Long.signaledToWakeCount
         inline get() = getValue(SIGNALED_TO_WAKE_COUNT_MASK, SIGNALED_TO_WAKE_COUNT_SHIFT)
 
-    inline fun Long.setSignalCount(value: Int) =
+    protected inline fun Long.setSignalCount(value: Int) =
         setValue(value, SIGNAL_COUNT_MASK, SIGNAL_COUNT_SHIFT)
-    inline fun Long.setWaiterCount(value: Int) =
+    protected inline fun Long.setWaiterCount(value: Int) =
         setValue(value, WAITER_COUNT_MASK, WAITER_COUNT_SHIFT)
-    inline fun Long.setSpinnerCount(value: Int) =
+    protected inline fun Long.setSpinnerCount(value: Int) =
         setValue(value, SPINNER_COUNT_MASK, SPINNER_COUNT_SHIFT)
-    inline fun Long.setSignaledToWakeCount(value: Int) =
+    protected inline fun Long.setSignaledToWakeCount(value: Int) =
         setValue(value, SIGNALED_TO_WAKE_COUNT_MASK, SIGNALED_TO_WAKE_COUNT_SHIFT)
 
-    inline fun Long.addSignalCount(value: Int) =
+    protected inline fun Long.addSignalCount(value: Int) =
         this + (value.toLong() shl SIGNAL_COUNT_SHIFT)
-    inline fun Long.incrementSignalCount() =
+    protected inline fun Long.incrementSignalCount() =
         this + (1L shl SIGNAL_COUNT_SHIFT)
-    inline fun Long.decrementSignalCount() =
+    protected inline fun Long.decrementSignalCount() =
         this - (1L shl SIGNAL_COUNT_SHIFT)
-    inline fun Long.incrementWaiterCount() =
+    protected inline fun Long.incrementWaiterCount() =
         this + (1L shl WAITER_COUNT_SHIFT)
-    inline fun Long.decrementWaiterCount() =
+    protected inline fun Long.decrementWaiterCount() =
         this - (1L shl WAITER_COUNT_SHIFT)
-    inline fun Long.incrementSpinnerCount() =
+    protected inline fun Long.incrementSpinnerCount() =
         this + (1L shl SPINNER_COUNT_SHIFT)
-    inline fun Long.decrementSpinnerCount() =
+    protected inline fun Long.decrementSpinnerCount() =
         this - (1L shl SPINNER_COUNT_SHIFT)
-    inline fun Long.decrementSignaledToWakeCount() =
+    protected inline fun Long.decrementSignaledToWakeCount() =
         this - (1L shl SIGNALED_TO_WAKE_COUNT_SHIFT)
 
-    inline fun Long.addUpToMaxSignaledToWakeCount(value: Int): Long {
+    protected inline fun Long.addUpToMaxSignaledToWakeCount(value: Int): Long {
         val availableCount = 255 - signaledToWakeCount
         val toAdd = minOf(availableCount, value).toLong()
         return this + (toAdd shl SIGNALED_TO_WAKE_COUNT_SHIFT)
     }
 
-    inline fun interlockedDecrementWaiterCount() =
+    protected inline fun interlockedDecrementWaiterCount() =
         data.getAndAdd(-1L shl WAITER_COUNT_SHIFT)
 
     // ===============================================
