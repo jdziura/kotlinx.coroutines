@@ -7,12 +7,15 @@ package kotlinx.coroutines.scheduling
 import kotlinx.atomicfu.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.internal.*
+import kotlinx.coroutines.internal.ReentrantLock
 import java.io.*
 import java.util.concurrent.*
 import java.util.concurrent.locks.*
 import kotlin.jvm.internal.Ref.ObjectRef
 import kotlin.math.*
 import kotlin.random.*
+
+internal const val ENABLE_ESTIMATED_STEAL_DELAY = true
 
 /**
  * Coroutine scheduler (pool of shared threads) which primary target is to distribute dispatched coroutines
@@ -331,7 +334,18 @@ internal class CoroutineScheduler(
         private const val PARKED_INDEX_MASK = CREATED_MASK
         private const val PARKED_VERSION_MASK = CREATED_MASK.inv()
         private const val PARKED_VERSION_INC = 1L shl BLOCKING_SHIFT
+
+
+        private const val SAMPLE_INTERVAL_MS_LOW = 10
+        private const val SAMPLE_INTERVAL_MS_HIGH = 200
+        private const val MAX_SAMPLE_ERROR = 15.0 / 100.0
+
+        private const val NANO_TO_MS = 1_000_000L
+        private const val INF_TIME_NS = 1_000_000_000L
     }
+
+    private val collector = ThroughputCollector()
+
 
     override fun execute(command: Runnable) = dispatch(command)
 
@@ -803,6 +817,10 @@ internal class CoroutineScheduler(
         }
 
         private fun afterTask(taskMode: Int) {
+            if (ENABLE_ESTIMATED_STEAL_DELAY) {
+                throughputCollector.notifyTaskCompleted()
+            }
+
             if (taskMode == TASK_NON_BLOCKING) return
             decrementBlockingTasks()
             val currentState = state
@@ -968,17 +986,33 @@ internal class CoroutineScheduler(
 
             var currentIndex = nextInt(created)
             var minDelay = Long.MAX_VALUE
-            repeat(created) {
+            for (i in 1..created) {
                 ++currentIndex
                 if (currentIndex > created) currentIndex = 1
                 val worker = workers[currentIndex]
                 if (worker !== null && worker !== this) {
+                    if (ENABLE_ESTIMATED_STEAL_DELAY) {
+                        val size = worker.localQueue.size
+
+                        if (size == 0) {
+                            // No tasks in queue
+                            continue
+                        }
+
+                        val eta = throughputCollector.estimatedAverageCompletionTime * size
+
+                        if (eta < WORK_STEALING_TIME_RESOLUTION_NS) {
+                            minDelay = min(minDelay, WORK_STEALING_TIME_RESOLUTION_NS - eta)
+                            continue
+                        }
+                    }
+
                     val stealResult = worker.localQueue.trySteal(stealingMode, stolenTask)
                     if (stealResult == TASK_STOLEN) {
                         val result = stolenTask.element
                         stolenTask.element = null
                         return result
-                    } else if (stealResult > 0) {
+                    } else if (!ENABLE_ESTIMATED_STEAL_DELAY && stealResult > 0) {
                         minDelay = min(minDelay, stealResult)
                     }
                 }
@@ -986,6 +1020,80 @@ internal class CoroutineScheduler(
             minDelayUntilStealableTaskNs = if (minDelay != Long.MAX_VALUE) minDelay else 0
             return null
         }
+    }
+
+    private val throughputCollector = ThroughputCollector()
+
+    internal inner class ThroughputCollector {
+        private var accumulatedSampleDurationMs = 0L
+        private var accumulatedCompletionCount = 0L
+
+        private val completionCount = atomic(0L)
+        private var priorCompletionCount = 0L
+        private val mutex = ReentrantLock()
+        private var currentSampleStartTime = System.currentTimeMillis()
+
+        @Volatile private var nextAdjustmentTime = currentSampleStartTime + SAMPLE_INTERVAL_MS_LOW
+        @Volatile private var _estimatedAverageCompletionTime = INF_TIME_NS
+        val estimatedAverageCompletionTime: Long inline get() = _estimatedAverageCompletionTime
+
+        fun notifyTaskCompleted() {
+            completionCount.incrementAndGet()
+            val currentTimeMs = System.currentTimeMillis()
+            if (shouldAdjust(currentTimeMs)) {
+                tryUpdate(currentTimeMs)
+            }
+        }
+
+        private fun shouldAdjust(currentTimeMs: Long): Boolean {
+            return currentTimeMs >= nextAdjustmentTime
+        }
+
+        private fun tryUpdate(currentTimeMs: Long) {
+            if (!mutex.tryLock()) {
+                return
+            }
+
+            try {
+                if (!shouldAdjust(currentTimeMs)) {
+                    // We lost a race
+                    return
+                }
+
+                val totalCompletionCount = completionCount.value
+                val currentCompletionCount = totalCompletionCount - priorCompletionCount
+                val sampleDurationMs = currentTimeMs - currentSampleStartTime
+
+                val newDelay = update(sampleDurationMs, currentCompletionCount)
+
+                nextAdjustmentTime = currentTimeMs + newDelay
+                currentSampleStartTime = currentTimeMs
+                priorCompletionCount = totalCompletionCount
+            } finally {
+                mutex.unlock()
+            }
+        }
+
+        private fun update(pSampleDurationMs: Long, pNumCompletions: Long): Int {
+            val sampleDurationMs = pSampleDurationMs + accumulatedSampleDurationMs
+            val numCompletions = pNumCompletions + accumulatedCompletionCount
+
+            require(numCompletions > 0)
+
+            if ((createdWorkers - 1.0) / numCompletions >= MAX_SAMPLE_ERROR) {
+                accumulatedSampleDurationMs = sampleDurationMs
+                accumulatedCompletionCount = numCompletions
+                return SAMPLE_INTERVAL_MS_LOW
+            }
+
+            accumulatedSampleDurationMs = 0L
+            accumulatedCompletionCount = 0L
+
+            _estimatedAverageCompletionTime = (NANO_TO_MS * sampleDurationMs * createdWorkers) / numCompletions
+
+            return Random.nextInt(SAMPLE_INTERVAL_MS_LOW, SAMPLE_INTERVAL_MS_HIGH)
+        }
+
     }
 
     enum class WorkerState {
