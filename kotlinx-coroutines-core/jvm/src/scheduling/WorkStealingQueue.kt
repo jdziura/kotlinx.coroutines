@@ -45,6 +45,8 @@ internal class WorkStealingQueue {
     private val mutex = QueueLock()
     private val canSteal: Boolean get() = headIndex < tailIndex
 
+    val size: Int get() = tailIndex - headIndex
+
     fun localPush(task: Task) {
         var tail = tailIndex
 

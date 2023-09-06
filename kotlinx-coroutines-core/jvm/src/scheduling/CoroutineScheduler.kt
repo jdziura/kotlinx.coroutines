@@ -19,7 +19,7 @@ import kotlin.random.Random
 
 // If enabled, scheduler will dynamically adjust the number of active worker threads based on
 // current throughput, trying to maximize it with minimum number of workers.
-internal const val ENABLE_HILL_CLIMBING = false
+internal const val ENABLE_HILL_CLIMBING = true
 
 // If enabled, GateThread will try to inject a thread twice per second
 // if no work has been done for this time.
@@ -27,14 +27,19 @@ internal const val ENABLE_STARVATION_DETECTION = false
 
 // If enabled, tasks added to local queues will have to wait for a small period of time until they
 // can be stealable. Works only for kotlin queues.
-internal const val ENABLE_MIN_DELAY_UNTIL_STEALING = false
+internal const val ENABLE_MIN_DELAY_UNTIL_STEALING = true
+
+// If enabled, will try to predict if a stealable task will be processed in very near future to
+// decide on stealing or parking.
+// Requires ENABLE_HILL_CLIMBING and ENABLE_MIN_DELAY_UNTIL_STEALING or does nothing.
+internal const val ENABLE_STEALING_DELAY_ESTIMATION = true
 
 // If set to true, there could be up to CPU-count active thread requests (entering ensureThreadRequested()).
 // Otherwise, only 1 request is allowed at a time.
 internal const val ENABLE_CONCURRENT_THREAD_REQUESTS = false
 
 // If false, will use ported .NET implementation
-internal const val USE_KOTLIN_LOCAL_QUEUES = true
+internal const val USE_KOTLIN_LOCAL_QUEUES = false
 
 // If false, will use JAVA ConcurrentLinkedQueue
 internal const val USE_KOTLIN_GLOBAL_QUEUE = true
@@ -45,7 +50,7 @@ internal const val USE_DOTNET_QUEUE_SPINLOCK = false
 
 // If true, uses custom .NET semaphore for managing number of active threads.
 // It uses JAVA semaphore under the hood but wraps it with larger logic of spin waiting.
-internal const val USE_DOTNET_SEMAPHORE = true
+internal const val USE_DOTNET_SEMAPHORE = false
 
 internal const val LOG_MAJOR_HC_ADJUSTMENTS = false
 
@@ -956,7 +961,7 @@ internal class CoroutineScheduler(
 
                 if (firstLoop) {
                     // A task was successfully dequeued, and there may be more tasks to process. Request a thread to
-                    // parallelize processing of tasks, before processing more. Following this, it is the
+                    // parallelize processing of tasks, befor`e processing more. Following this, it is the
                     // responsibility of the new thread and other enqueuing work to request more threads as necessary.
                     // The parallelization may be necessary here for correctness if the task blocks for some
                     // reason that may have a dependency on other queued tasks.
@@ -1007,7 +1012,7 @@ internal class CoroutineScheduler(
             var minDelay = Long.MAX_VALUE
             var missedSteal = false
 
-            repeat(created) {
+            for (i in 1..created) {
                 ++currentIndex
                 if (currentIndex > created) currentIndex = 1
                 val worker = workers[currentIndex]
@@ -1028,6 +1033,22 @@ internal class CoroutineScheduler(
                             }
                         }
                     } else {
+                        if (ENABLE_STEALING_DELAY_ESTIMATION) {
+                            val size = worker.localQueueDotnet.size
+                            val eta = (hillClimber.estimatedAverageCompletionTime * size).toLong()
+
+                            if (size == 0) {
+                                // No tasks in queue
+                                continue
+                            }
+
+                            if (eta < WORK_STEALING_TIME_RESOLUTION_NS) {
+                                // Task will probably be processed quickly, let's not interfere
+                                minDelay = min(minDelay, WORK_STEALING_TIME_RESOLUTION_NS - eta)
+                                continue
+                            }
+                        }
+
                         val result = worker.localQueueDotnet.trySteal()
                         if (result.isFailure) {
                             missedSteal = true
