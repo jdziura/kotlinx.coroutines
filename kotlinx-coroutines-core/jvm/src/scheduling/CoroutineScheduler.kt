@@ -822,10 +822,9 @@ internal class CoroutineScheduler(
 
         // Acquires permit, thus being able to process work.
         private fun tryAcquirePermit(spinWait: Boolean): Boolean {
-            if (spinWait != false) require(spinWait == true)
             return try {
                 if (USE_DOTNET_SEMAPHORE) {
-                    semaphoreDotnet.wait(idleWorkerKeepAliveNs / 1_000_000, true)
+                    semaphoreDotnet.wait(idleWorkerKeepAliveNs / 1_000_000, spinWait)
                 } else {
                     semaphore.tryAcquire(idleWorkerKeepAliveNs, TimeUnit.NANOSECONDS)
                 }

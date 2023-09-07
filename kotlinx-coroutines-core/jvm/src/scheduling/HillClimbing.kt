@@ -161,7 +161,7 @@ internal class HillClimbing(
         val newEstimatedAverageCompletionTime = if (numCompletions == 0) {
             INF_TIME
         } else {
-            (NANO_TO_SEC / throughput).toLong()
+            ((NANO_TO_SEC * currentThreadCount) / throughput).toLong()
         }
         _estimatedAverageCompletionTime = newEstimatedAverageCompletionTime
 
