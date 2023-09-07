@@ -121,7 +121,7 @@ internal class WorkQueue {
      * * [STEAL_BLOCKING_ONLY] is mode for stealing *an arbitrary* blocking task, which is used by the scheduler when helping in Dispatchers.IO mode
      * * [STEAL_CPU_ONLY] is a kludge for `runSingleTaskFromCurrentSystemDispatcher`
      */
-    fun trySteal(stealingMode: StealingMode, stolenTaskRef: ObjectRef<Task?>): Long {
+    fun trySteal(stealingMode: StealingMode, stolenTaskRef: ObjectRef<Task?>, ignoreDelay: Boolean = false): Long {
         val task = when (stealingMode) {
             STEAL_ANY -> pollBuffer()
             else -> stealWithExclusiveMode(stealingMode)
@@ -131,7 +131,7 @@ internal class WorkQueue {
             stolenTaskRef.element = task
             return TASK_STOLEN
         }
-        return tryStealLastScheduled(stealingMode, stolenTaskRef)
+        return tryStealLastScheduled(stealingMode, stolenTaskRef, ignoreDelay)
     }
 
     // Steal only tasks of a particular kind, potentially invoking full queue scan
@@ -199,18 +199,20 @@ internal class WorkQueue {
     /**
      * Contract on return value is the same as for [trySteal]
      */
-    private fun tryStealLastScheduled(stealingMode: StealingMode, stolenTaskRef: ObjectRef<Task?>): Long {
+    private fun tryStealLastScheduled(stealingMode: StealingMode, stolenTaskRef: ObjectRef<Task?>, ignoreDelay: Boolean = false): Long {
         while (true) {
             val lastScheduled = lastScheduledTask.value ?: return NOTHING_TO_STEAL
             if ((lastScheduled.maskForStealingMode and stealingMode) == 0) {
                 return NOTHING_TO_STEAL
             }
 
-            // TODO time wraparound ?
-            val time = schedulerTimeSource.nanoTime()
-            val staleness = time - lastScheduled.submissionTime
-            if (staleness < WORK_STEALING_TIME_RESOLUTION_NS) {
-                return WORK_STEALING_TIME_RESOLUTION_NS - staleness
+            if (!ignoreDelay) {
+                // TODO time wraparound ?
+                val time = schedulerTimeSource.nanoTime()
+                val staleness = time - lastScheduled.submissionTime
+                if (staleness < WORK_STEALING_TIME_RESOLUTION_NS) {
+                    return WORK_STEALING_TIME_RESOLUTION_NS - staleness
+                }
             }
 
             /*

@@ -344,8 +344,6 @@ internal class CoroutineScheduler(
         private const val INF_TIME_NS = 1_000_000_000L
     }
 
-    private val collector = ThroughputCollector()
-
 
     override fun execute(command: Runnable) = dispatch(command)
 
@@ -818,7 +816,7 @@ internal class CoroutineScheduler(
 
         private fun afterTask(taskMode: Int) {
             if (ENABLE_ESTIMATED_STEAL_DELAY) {
-                throughputCollector.notifyTaskCompleted()
+                notifyTaskCompleted()
             }
 
             if (taskMode == TASK_NON_BLOCKING) return
@@ -848,6 +846,16 @@ internal class CoroutineScheduler(
             }
             return (r and Int.MAX_VALUE) % upperBound
         }
+
+        fun notifyTaskCompleted() {
+            throughputCollector.incrementCompletionCount()
+            if (nextInt(32) != 0) return
+            val currentTimeMs = System.currentTimeMillis()
+            if (throughputCollector.shouldAdjust(currentTimeMs)) {
+                throughputCollector.tryUpdate(currentTimeMs)
+            }
+        }
+
 
         private fun park() {
             // set termination deadline the first time we are here (it is reset in idleReset)
@@ -991,28 +999,16 @@ internal class CoroutineScheduler(
                 if (currentIndex > created) currentIndex = 1
                 val worker = workers[currentIndex]
                 if (worker !== null && worker !== this) {
-                    if (ENABLE_ESTIMATED_STEAL_DELAY) {
-                        val size = worker.localQueue.size
+                    // ETA is expected time to complete current task by current thread.
+                    val eta = throughputCollector.estimatedAverageCompletionTime / 2
+                    val ignoreDelay = ENABLE_ESTIMATED_STEAL_DELAY && eta > WORK_STEALING_TIME_RESOLUTION_NS
+                    val stealResult = worker.localQueue.trySteal(stealingMode, stolenTask, ignoreDelay)
 
-                        if (size == 0) {
-                            // No tasks in queue
-                            continue
-                        }
-
-                        val eta = throughputCollector.estimatedAverageCompletionTime * size
-
-                        if (eta < WORK_STEALING_TIME_RESOLUTION_NS) {
-                            minDelay = min(minDelay, WORK_STEALING_TIME_RESOLUTION_NS - eta)
-                            continue
-                        }
-                    }
-
-                    val stealResult = worker.localQueue.trySteal(stealingMode, stolenTask)
                     if (stealResult == TASK_STOLEN) {
                         val result = stolenTask.element
                         stolenTask.element = null
                         return result
-                    } else if (!ENABLE_ESTIMATED_STEAL_DELAY && stealResult > 0) {
+                    } else if (stealResult > 0) {
                         minDelay = min(minDelay, stealResult)
                     }
                 }
@@ -1037,19 +1033,13 @@ internal class CoroutineScheduler(
         @Volatile private var _estimatedAverageCompletionTime = INF_TIME_NS
         val estimatedAverageCompletionTime: Long inline get() = _estimatedAverageCompletionTime
 
-        fun notifyTaskCompleted() {
-            completionCount.incrementAndGet()
-            val currentTimeMs = System.currentTimeMillis()
-            if (shouldAdjust(currentTimeMs)) {
-                tryUpdate(currentTimeMs)
-            }
-        }
+        inline fun incrementCompletionCount() = completionCount.incrementAndGet()
 
-        private fun shouldAdjust(currentTimeMs: Long): Boolean {
+        fun shouldAdjust(currentTimeMs: Long): Boolean {
             return currentTimeMs >= nextAdjustmentTime
         }
 
-        private fun tryUpdate(currentTimeMs: Long) {
+        fun tryUpdate(currentTimeMs: Long) {
             if (!mutex.tryLock()) {
                 return
             }
