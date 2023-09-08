@@ -370,6 +370,12 @@ internal class CoroutineScheduler(
                 worker.localQueue.offloadAllWorkTo(globalBlockingQueue) // Doesn't actually matter which queue to use
             }
         }
+
+        while (throughputCollector.isAlive) {
+            LockSupport.unpark(throughputCollector)
+            throughputCollector.join(timeout)
+        }
+
         // Make sure no more work is added to GlobalQueue from anywhere
         globalBlockingQueue.close()
         globalCpuQueue.close()
@@ -698,7 +704,17 @@ internal class CoroutineScheduler(
         @JvmField
         var mayHaveLocalTasks = false
 
+        private fun ensureCollectorRunning() {
+            if (collectorRunning.compareAndSet(false, true)) {
+                throughputCollector.start()
+            }
+        }
+
         private fun runWorker() {
+            if (ENABLE_ESTIMATED_STEAL_DELAY) {
+                ensureCollectorRunning()
+            }
+
             var rescanned = false
             while (!isTerminated && state != WorkerState.TERMINATED) {
                 val task = findTask(mayHaveLocalTasks)
@@ -847,13 +863,8 @@ internal class CoroutineScheduler(
             return (r and Int.MAX_VALUE) % upperBound
         }
 
-        fun notifyTaskCompleted() {
+        private fun notifyTaskCompleted() {
             throughputCollector.incrementCompletionCount()
-            if (nextInt(32) != 0) return
-            val currentTimeMs = System.currentTimeMillis()
-            if (throughputCollector.shouldAdjust(currentTimeMs)) {
-                throughputCollector.tryUpdate(currentTimeMs)
-            }
         }
 
 
@@ -1019,48 +1030,49 @@ internal class CoroutineScheduler(
     }
 
     private val throughputCollector = ThroughputCollector()
+    private val collectorRunning = atomic(false)
 
-    internal inner class ThroughputCollector {
+    internal inner class ThroughputCollector : Thread() {
+        init {
+            name = "$schedulerName-throughputCollector"
+            isDaemon = true
+        }
+
         private var accumulatedSampleDurationMs = 0L
         private var accumulatedCompletionCount = 0L
 
         private val completionCount = atomic(0L)
         private var priorCompletionCount = 0L
-        private val mutex = ReentrantLock()
-        private var currentSampleStartTime = System.currentTimeMillis()
+        private var currentSampleStartTimeMs = 0L
+        private var currentSampleEndTimeMs = 0L
 
-        @Volatile private var nextAdjustmentTime = currentSampleStartTime + SAMPLE_INTERVAL_MS_LOW
-        @Volatile private var _estimatedAverageCompletionTime = INF_TIME_NS
+        @Volatile private var _estimatedAverageCompletionTime = 0L
         val estimatedAverageCompletionTime: Long inline get() = _estimatedAverageCompletionTime
-
         inline fun incrementCompletionCount() = completionCount.incrementAndGet()
 
-        fun shouldAdjust(currentTimeMs: Long): Boolean {
-            return currentTimeMs >= nextAdjustmentTime
-        }
+        override fun run() = runCollector()
 
-        fun tryUpdate(currentTimeMs: Long) {
-            if (!mutex.tryLock()) {
-                return
-            }
+        private fun runCollector() {
+            currentSampleStartTimeMs = System.currentTimeMillis()
+            currentSampleEndTimeMs = currentSampleStartTimeMs + SAMPLE_INTERVAL_MS_LOW
 
-            try {
-                if (!shouldAdjust(currentTimeMs)) {
-                    // We lost a race
-                    return
+            while (!isTerminated) {
+                val currentTimeMs = System.currentTimeMillis()
+
+                if (currentSampleEndTimeMs > currentTimeMs) {
+                    LockSupport.parkNanos(NANO_TO_MS * (currentSampleEndTimeMs - currentTimeMs))
+                    continue
                 }
 
                 val totalCompletionCount = completionCount.value
                 val currentCompletionCount = totalCompletionCount - priorCompletionCount
-                val sampleDurationMs = currentTimeMs - currentSampleStartTime
+                val sampleDurationMs = currentTimeMs - currentSampleStartTimeMs
 
                 val newDelay = update(sampleDurationMs, currentCompletionCount)
 
-                nextAdjustmentTime = currentTimeMs + newDelay
-                currentSampleStartTime = currentTimeMs
+                currentSampleStartTimeMs = currentTimeMs
+                currentSampleEndTimeMs = currentTimeMs + newDelay
                 priorCompletionCount = totalCompletionCount
-            } finally {
-                mutex.unlock()
             }
         }
 
@@ -1068,7 +1080,9 @@ internal class CoroutineScheduler(
             val sampleDurationMs = pSampleDurationMs + accumulatedSampleDurationMs
             val numCompletions = pNumCompletions + accumulatedCompletionCount
 
-            require(numCompletions > 0)
+            if (numCompletions == 0L) {
+                return Random.nextInt(SAMPLE_INTERVAL_MS_LOW, SAMPLE_INTERVAL_MS_HIGH)
+            }
 
             if ((createdWorkers - 1.0) / numCompletions >= MAX_SAMPLE_ERROR) {
                 accumulatedSampleDurationMs = sampleDurationMs
@@ -1079,11 +1093,10 @@ internal class CoroutineScheduler(
             accumulatedSampleDurationMs = 0L
             accumulatedCompletionCount = 0L
 
-            _estimatedAverageCompletionTime = (NANO_TO_MS * sampleDurationMs * createdWorkers) / numCompletions
+            _estimatedAverageCompletionTime = (NANO_TO_MS * sampleDurationMs) / numCompletions
 
             return Random.nextInt(SAMPLE_INTERVAL_MS_LOW, SAMPLE_INTERVAL_MS_HIGH)
         }
-
     }
 
     enum class WorkerState {
