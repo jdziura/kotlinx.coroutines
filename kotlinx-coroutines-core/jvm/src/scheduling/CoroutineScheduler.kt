@@ -1093,7 +1093,7 @@ internal class CoroutineScheduler(
             accumulatedSampleDurationMs = 0L
             accumulatedCompletionCount = 0L
 
-            _estimatedAverageCompletionTime = (NANO_TO_MS * sampleDurationMs) / numCompletions
+            _estimatedAverageCompletionTime = (NANO_TO_MS * sampleDurationMs * createdWorkers) / numCompletions
 
             return Random.nextInt(SAMPLE_INTERVAL_MS_LOW, SAMPLE_INTERVAL_MS_HIGH)
         }
