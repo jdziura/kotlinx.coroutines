@@ -6,6 +6,7 @@
 
 package benchmarks.flow
 
+import benchmarks.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.flow.internal.*
@@ -18,7 +19,10 @@ import java.util.concurrent.TimeUnit
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Benchmark)
-open class TakeWhileBenchmark {
+open class TakeWhileBenchmark : ParametrizedDispatcherBase() {
+    @Param("scheduler", "fjp", "go_scheduler, dotnet_scheduler")
+    override var dispatcher: String = "fjp"
+
     @Param("1", "10", "100", "1000")
     private var size: Int = 0
 

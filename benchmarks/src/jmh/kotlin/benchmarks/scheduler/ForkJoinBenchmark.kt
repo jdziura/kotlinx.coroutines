@@ -45,7 +45,9 @@ open class ForkJoinBenchmark : ParametrizedDispatcherBase() {
     }
 
     lateinit var coefficients: LongArray
-    override var dispatcher: String = "scheduler"
+
+    @Param("scheduler", "fjp", "go_scheduler, dotnet_scheduler", "ftp_1", "ftp_8")
+    override var dispatcher: String = "fjp"
 
     @Setup
     override fun setup() {
@@ -54,25 +56,8 @@ open class ForkJoinBenchmark : ParametrizedDispatcherBase() {
     }
 
     @Benchmark
-    fun asyncFjp() = runBlocking {
-        CoroutineScope(ForkJoinPool.commonPool().asCoroutineDispatcher()).startAsync(coefficients, 0, coefficients.size).await()
-    }
-
-    @Benchmark
-    fun asyncExperimental() = runBlocking {
+    fun forkJoin() = runBlocking {
         startAsync(coefficients, 0, coefficients.size).await()
-    }
-
-    @Benchmark
-    fun fjpRecursiveTask(): Double {
-        val task = RecursiveAction(coefficients, 0, coefficients.size)
-        return ForkJoinPool.commonPool().submit(task).join()
-    }
-
-    @Benchmark
-    fun fjpTask(): Double {
-        val task = Task(coefficients, 0, coefficients.size)
-        return ForkJoinPool.commonPool().submit(task).join()
     }
 
     suspend fun CoroutineScope.startAsync(coefficients: LongArray, start: Int, end: Int): Deferred<Double> = async {

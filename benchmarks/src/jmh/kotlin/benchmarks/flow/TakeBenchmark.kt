@@ -4,6 +4,7 @@
 
 package benchmarks.flow
 
+import benchmarks.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import org.openjdk.jmh.annotations.*
@@ -19,7 +20,10 @@ import benchmarks.flow.scrabble.flow as unsafeFlow
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Benchmark)
-open class TakeBenchmark {
+open class TakeBenchmark : ParametrizedDispatcherBase() {
+    @Param("scheduler", "fjp", "go_scheduler, dotnet_scheduler")
+    override var dispatcher: String = "fjp"
+
     @Param("1", "10", "100", "1000")
     private var size: Int = 0
 

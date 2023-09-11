@@ -31,6 +31,12 @@ abstract class ParametrizedDispatcherBase : CoroutineScope {
             dispatcher == "scheduler" -> {
                 Dispatchers.Default
             }
+            dispatcher == "go_based" -> {
+                Dispatchers.GoBased
+            }
+            dispatcher == "dotnet_based" -> {
+                Dispatchers.DotnetBased
+            }
             dispatcher.startsWith("ftp") -> {
                 newFixedThreadPoolContext(dispatcher.substring(4).toInt(), dispatcher).also { closeable = it }
             }

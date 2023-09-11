@@ -4,6 +4,7 @@
 
 package benchmarks.flow
 
+import benchmarks.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import org.openjdk.jmh.annotations.*
@@ -15,7 +16,9 @@ import java.util.concurrent.*
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
-open class CombineFlowsBenchmark {
+open class CombineFlowsBenchmark : ParametrizedDispatcherBase() {
+    @Param("scheduler", "fjp", "go_scheduler, dotnet_scheduler")
+    override var dispatcher: String = "fjp"
 
     @Param("10", "100", "1000")
     private var size = 10

@@ -13,6 +13,8 @@ import org.openjdk.jmh.annotations.*
 import java.lang.Integer.max
 import java.util.concurrent.Phaser
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ForkJoinPool
+import java.util.concurrent.ThreadLocalRandom
 
 
 /**
@@ -31,7 +33,7 @@ import java.util.concurrent.TimeUnit
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
 open class ChannelProducerConsumerBenchmark {
-    @Param
+    @Param("FORK_JOIN", "KOTLIN_DEFAULT", "GO_BASED", "DOTNET_BASED")
     private var _0_dispatcher: DispatcherCreator = DispatcherCreator.DEFAULT
 
     @Param
@@ -136,9 +138,10 @@ open class ChannelProducerConsumerBenchmark {
 }
 
 enum class DispatcherCreator(val create: (parallelism: Int) -> CoroutineDispatcher) {
-    //FORK_JOIN({ parallelism ->  ForkJoinPool(parallelism).asCoroutineDispatcher() }),
-    @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
-    DEFAULT({ parallelism -> ExperimentalCoroutineDispatcher(corePoolSize = parallelism, maxPoolSize = parallelism) })
+    FORK_JOIN({ parallelism ->  ForkJoinPool(parallelism).asCoroutineDispatcher() }),
+    KOTLIN_DEFAULT({ parallelism -> Dispatchers.Default.limitedParallelism(parallelism) }),
+    GO_BASED({ parallelism -> Dispatchers.GoBased.limitedParallelism(parallelism) }),
+    DOTNET_BASED({ parallelism -> Dispatchers.DotnetBased.limitedParallelism(parallelism) })
 }
 
 enum class ChannelCreator(private val capacity: Int) {

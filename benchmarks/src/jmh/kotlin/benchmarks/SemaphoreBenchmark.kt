@@ -19,8 +19,8 @@ import java.util.concurrent.*
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
 open class SemaphoreBenchmark {
-    @Param
-    private var _1_dispatcher: SemaphoreBenchDispatcherCreator = SemaphoreBenchDispatcherCreator.DEFAULT
+    @Param("FORK_JOIN", "KOTLIN_DEFAULT", "GO_BASED, DOTNET_BASED")
+    private var _1_dispatcher: SemaphoreBenchDispatcherCreator = SemaphoreBenchDispatcherCreator.FORK_JOIN
 
     @Param("0", "1000")
     private var _2_coroutines: Int = 0
@@ -80,9 +80,10 @@ open class SemaphoreBenchmark {
 }
 
 enum class SemaphoreBenchDispatcherCreator(val create: (parallelism: Int) -> CoroutineDispatcher) {
-    //    FORK_JOIN({ parallelism -> ForkJoinPool(parallelism).asCoroutineDispatcher() }),
-    @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
-    DEFAULT({ parallelism -> ExperimentalCoroutineDispatcher(corePoolSize = parallelism, maxPoolSize = parallelism) })
+    FORK_JOIN({ parallelism ->  ForkJoinPool(parallelism).asCoroutineDispatcher() }),
+    KOTLIN_DEFAULT({ parallelism -> Dispatchers.Default.limitedParallelism(parallelism) }),
+    GO_BASED({ parallelism -> Dispatchers.GoBased.limitedParallelism(parallelism) }),
+    DOTNET_BASED({ parallelism -> Dispatchers.DotnetBased.limitedParallelism(parallelism) })
 }
 
 private const val WORK_INSIDE = 50
