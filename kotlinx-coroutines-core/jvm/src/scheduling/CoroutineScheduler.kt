@@ -29,11 +29,6 @@ internal const val ENABLE_STARVATION_DETECTION = false
 // can be stealable. Works only for kotlin queues.
 internal const val ENABLE_MIN_DELAY_UNTIL_STEALING = true
 
-// If enabled, will try to predict if a stealable task will be processed in very near future to
-// decide on stealing or parking.
-// Requires ENABLE_HILL_CLIMBING and ENABLE_MIN_DELAY_UNTIL_STEALING or does nothing.
-internal const val ENABLE_STEALING_DELAY_ESTIMATION = true
-
 // If set to true, there could be up to CPU-count active thread requests (entering ensureThreadRequested()).
 // Otherwise, only 1 request is allowed at a time.
 internal const val ENABLE_CONCURRENT_THREAD_REQUESTS = false
@@ -378,8 +373,11 @@ internal class CoroutineScheduler(
                 threadAdjustmentIntervalMs = newThreadAdjustmentIntervalMs
 
                 if (oldNumThreadsGoal != newNumThreadsGoal) {
-                    // There is an actual adjustment, we have to update data.
                     interlockedSetNumThreadsGoal(newNumThreadsGoal)
+
+                    // If we're increasing the goal, inject a thread. If that thread finds work, it will inject
+                    // another thread, etc., until nobody finds work, or we reach the new goal.
+                    // If we're reducing the goal, whichever threads notice this first will sleep and timeout themselves.
                     if (newNumThreadsGoal > oldNumThreadsGoal) {
                         addWorker = true
                     }
@@ -452,27 +450,6 @@ internal class CoroutineScheduler(
             workers.setSynchronized(newIndex, worker)
         }
         worker.start()
-    }
-
-    // Reduce the number of working workers by one, but maybe add back a worker (possibly this thread)
-    // if a thread request comes in while we are marking this thread as not working.
-    private fun removeWorkingWorker() {
-        // [TODO] Verify if atomic decrement would be better and sufficient.
-        while (true) {
-            val counts = threadCounts.value
-            val newCounts = counts.decrementNumProcessingWork()
-            if (threadCounts.compareAndSet(counts, newCounts)) {
-                break
-            }
-        }
-
-        // It's possible that we decided we had thread requests just before a request came in,
-        // but reduced the worker count *after* the request came in.  In this case, we might
-        // miss the notification of a thread request. So we wake up a thread (maybe this one!)
-        // if there is work to do.
-        if (numRequestedWorkers.value > 0) {
-            maybeAddWorker()
-        }
     }
 
     private fun takeActiveRequest(): Boolean {
@@ -552,8 +529,7 @@ internal class CoroutineScheduler(
             return (0L to false)
         }
 
-        // [TODO] Decide corePoolSize or MIN_SUPPORTED_POOL_SIZE
-        val configuredMaxThreadsWithoutDelay = min(MIN_SUPPORTED_POOL_SIZE + threadsToAddWithoutDelay, maxPoolSize)
+        val configuredMaxThreadsWithoutDelay = min(corePoolSize + threadsToAddWithoutDelay, maxPoolSize)
 
         do {
             val maxThreadsGoalWithoutDelay = max(configuredMaxThreadsWithoutDelay, min(counts.numExistingThreads, maxPoolSize))
@@ -592,16 +568,6 @@ internal class CoroutineScheduler(
         ensureGateThreadRunning()
     }
 
-    private fun sufficientDelaySinceLastDequeue(): Boolean {
-        val delay = System.currentTimeMillis() - lastDequeueTime
-
-        // [TODO] Handle CPU usage (it happens in .NET)
-
-        val minimumDelay = GATE_ACTIVITIES_PERIOD_MS
-
-        return delay > minimumDelay
-    }
-
     // Notifies scheduler that a thread starts executing blocking task, which means that
     // additional workers might be required.
     private fun notifyThreadBlocked() {
@@ -627,6 +593,7 @@ internal class CoroutineScheduler(
         }
     }
 
+    // Notifies scheduler that a thread finished executing blocking task.
     private fun notifyThreadUnblocked() {
         var shouldWakeGateThread = false
 
@@ -901,6 +868,27 @@ internal class CoroutineScheduler(
             }
         }
 
+        // Reduce the number of working workers by one, but maybe add back a worker (possibly this thread)
+        // if a thread request comes in while we are marking this thread as not working.
+        private fun removeWorkingWorker() {
+            // [TODO] Verify if atomic decrement would be sufficient.
+            while (true) {
+                val counts = threadCounts.value
+                val newCounts = counts.decrementNumProcessingWork()
+                if (threadCounts.compareAndSet(counts, newCounts)) {
+                    break
+                }
+            }
+
+            // It's possible that we decided we had thread requests just before a request came in,
+            // but reduced the worker count *after* the request came in.  In this case, we might
+            // miss the notification of a thread request. So we wake up a thread (maybe this one!)
+            // if there is work to do.
+            if (numRequestedWorkers.value > 0) {
+                maybeAddWorker()
+            }
+        }
+
         private fun tryTerminateWorker() {
             synchronized(workers) {
                 if (isTerminated) return
@@ -960,7 +948,7 @@ internal class CoroutineScheduler(
 
                 if (firstLoop) {
                     // A task was successfully dequeued, and there may be more tasks to process. Request a thread to
-                    // parallelize processing of tasks, befor`e processing more. Following this, it is the
+                    // parallelize processing of tasks, before processing more. Following this, it is the
                     // responsibility of the new thread and other enqueuing work to request more threads as necessary.
                     // The parallelization may be necessary here for correctness if the task blocks for some
                     // reason that may have a dependency on other queued tasks.
@@ -1032,22 +1020,6 @@ internal class CoroutineScheduler(
                             }
                         }
                     } else {
-                        if (ENABLE_STEALING_DELAY_ESTIMATION) {
-                            val size = worker.localQueueDotnet.size
-                            val eta = (hillClimber.estimatedAverageCompletionTime * size).toLong()
-
-                            if (size == 0) {
-                                // No tasks in queue
-                                continue
-                            }
-
-                            if (eta < WORK_STEALING_TIME_RESOLUTION_NS) {
-                                // Task will probably be processed quickly, let's not interfere
-                                minDelay = min(minDelay, WORK_STEALING_TIME_RESOLUTION_NS - eta)
-                                continue
-                            }
-                        }
-
                         val result = worker.localQueueDotnet.trySteal()
                         if (result.isFailure) {
                             missedSteal = true
@@ -1091,12 +1063,15 @@ internal class CoroutineScheduler(
                     val wasSignaledToWake = delayEvent.waitOne(delayHelper.getNextDelay(currentTimeMs))
                     currentTimeMs = System.currentTimeMillis()
 
+                    // Thread count adjustment for cooperative blocking
                     do {
                         if (pendingBlockingAdjustment == PendingBlockingAdjustment.None) {
                             delayHelper.clearBlockingAdjustmentDelay()
                             break
                         }
+
                         var previousDelayElapsed = false
+
                         if (delayHelper.hasBlockingAdjustmentDelay) {
                             previousDelayElapsed =
                                 delayHelper.hasBlockingAdjustmentDelayElapsed(currentTimeMs, wasSignaledToWake)
@@ -1119,7 +1094,7 @@ internal class CoroutineScheduler(
                         continue
                     }
 
-                    //[TODO] Here log CPU utilization if possible
+                    // [TODO] Here log CPU utilization if possible.
 
                     if (ENABLE_STARVATION_DETECTION &&
                         pendingBlockingAdjustment == PendingBlockingAdjustment.None &&
@@ -1158,6 +1133,13 @@ internal class CoroutineScheduler(
                     }
                 }
             }
+        }
+
+        // Called by logic to spawn new worker threads if no progress has been made for long enough time.
+        // [TODO] Handle CPU usage. In .NET if CPU usage is high, the delay depends on number of threads.
+        private fun sufficientDelaySinceLastDequeue(): Boolean {
+            val delay = System.currentTimeMillis() - lastDequeueTime
+            return delay > GATE_ACTIVITIES_PERIOD_MS
         }
     }
 
