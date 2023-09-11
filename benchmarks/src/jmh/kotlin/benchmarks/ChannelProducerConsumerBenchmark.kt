@@ -34,7 +34,7 @@ import java.util.concurrent.ThreadLocalRandom
 @State(Scope.Benchmark)
 open class ChannelProducerConsumerBenchmark {
     @Param("FORK_JOIN", "KOTLIN_DEFAULT", "GO_BASED", "DOTNET_BASED")
-    private var _0_dispatcher: DispatcherCreator = DispatcherCreator.DEFAULT
+    private var _0_dispatcher: DispatcherCreator = DispatcherCreator.FORK_JOIN
 
     @Param
     private var _1_channel: ChannelCreator = ChannelCreator.RENDEZVOUS

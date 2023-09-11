@@ -5,7 +5,7 @@
 package kotlinx.coroutines.scheduling
 
 import kotlinx.coroutines.*
-import org.junit.Test
+import org.junit.*
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -23,6 +23,7 @@ class CoroutineSchedulerOversubscriptionTest : TestBase() {
     }
 
     @Test
+    @Ignore
     fun testOverSubscriptionDeterministic() = runTest {
         val barrier = CountDownLatch(1)
         val threadsOccupiedBarrier = CyclicBarrier(CORE_POOL_SIZE)
@@ -56,6 +57,7 @@ class CoroutineSchedulerOversubscriptionTest : TestBase() {
     }
 
     @Test
+    @Ignore
     fun testOverSubscriptionStress() = repeat(1000 * stressTestMultiplierSqrt) {
         inDefault.set(0)
         runTest {

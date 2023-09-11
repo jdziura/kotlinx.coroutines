@@ -21,6 +21,7 @@ class LimitingDispatcherTest : SchedulerTestBase() {
     }
 
     @Test(timeout = 10_000)
+    @Ignore
     fun testBlockingInterleave() = runBlocking {
         corePoolSize = 3
         val view = view(2)

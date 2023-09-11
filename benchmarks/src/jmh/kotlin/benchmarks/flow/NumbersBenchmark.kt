@@ -22,7 +22,7 @@ import java.util.concurrent.Callable
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Benchmark)
 open class NumbersBenchmark : ParametrizedDispatcherBase() {
-    @Param("scheduler", "fjp", "go_scheduler, dotnet_scheduler")
+    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler")
     override var dispatcher: String = "fjp"
 
     companion object {

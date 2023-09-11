@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Benchmark)
 open class TakeWhileBenchmark : ParametrizedDispatcherBase() {
-    @Param("scheduler", "fjp", "go_scheduler, dotnet_scheduler")
+    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler")
     override var dispatcher: String = "fjp"
 
     @Param("1", "10", "100", "1000")

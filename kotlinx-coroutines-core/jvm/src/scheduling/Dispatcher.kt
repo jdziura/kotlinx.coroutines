@@ -108,6 +108,8 @@ internal open class SchedulerCoroutineDispatcher(
 
     protected open fun createScheduler(): Scheduler =
         CoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName)
+//        DotnetBasedCoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName)
+//        GoBasedCoroutineScheduler(corePoolSize, maxPoolSize, schedulerName)
 
     override fun dispatch(context: CoroutineContext, block: Runnable): Unit = coroutineScheduler.dispatch(block)
 
@@ -140,7 +142,7 @@ internal open class SchedulerCoroutineDispatcher(
 }
 
 internal object GoBasedScheduler : GoBasedCoroutineDispatcher() {}
-internal object DotnetBasedScheduler : GoBasedCoroutineDispatcher() {}
+internal object DotnetBasedScheduler : DotnetBasedCoroutineDispatcher() {}
 
 internal open class GoBasedCoroutineDispatcher(
     corePoolSize: Int = CORE_POOL_SIZE,

@@ -16,7 +16,7 @@ import java.util.concurrent.*
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Benchmark)
 open class SimpleChannelBenchmark : ParametrizedDispatcherBase() {
-    @Param("scheduler", "fjp", "go_scheduler, dotnet_scheduler")
+    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler")
     override var dispatcher: String = "fjp"
 
     private val iterations = 10_000

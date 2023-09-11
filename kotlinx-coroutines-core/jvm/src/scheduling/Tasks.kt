@@ -40,7 +40,7 @@ internal val CORE_POOL_SIZE = systemProp(
 @JvmField
 internal val MAX_POOL_SIZE = systemProp(
     "kotlinx.coroutines.scheduler.max.pool.size",
-    CoroutineScheduler.MAX_SUPPORTED_POOL_SIZE,
+    minOf(CoroutineScheduler.MAX_SUPPORTED_POOL_SIZE, DotnetBasedCoroutineScheduler.MAX_SUPPORTED_POOL_SIZE),
     maxValue = CoroutineScheduler.MAX_SUPPORTED_POOL_SIZE
 )
 

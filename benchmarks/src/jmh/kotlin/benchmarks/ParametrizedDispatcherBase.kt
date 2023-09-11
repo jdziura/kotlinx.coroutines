@@ -31,10 +31,10 @@ abstract class ParametrizedDispatcherBase : CoroutineScope {
             dispatcher == "scheduler" -> {
                 Dispatchers.Default
             }
-            dispatcher == "go_based" -> {
+            dispatcher == "go_scheduler" -> {
                 Dispatchers.GoBased
             }
-            dispatcher == "dotnet_based" -> {
+            dispatcher == "dotnet_scheduler" -> {
                 Dispatchers.DotnetBased
             }
             dispatcher.startsWith("ftp") -> {

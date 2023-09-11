@@ -40,7 +40,7 @@ open class CycledActorsBenchmark : ParametrizedDispatcherBase() {
         val NO_CHANNEL = Channel<Letter>(0)
     }
 
-    @Param("scheduler", "fjp", "go_scheduler, dotnet_scheduler", "ftp_1")
+    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler", "ftp_1")
     override var dispatcher: String = "fjp"
 
     @Param("1", "1024")

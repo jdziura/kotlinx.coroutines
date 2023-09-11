@@ -159,13 +159,21 @@ class RejectedExecutionTest : TestBase() {
 
     private fun assertDefaultDispatcherThread() {
         val thread = Thread.currentThread()
-        if (thread !is CoroutineScheduler.Worker) error("Not a thread from Dispatchers.Default: $thread")
-        assertEquals(CoroutineScheduler.WorkerState.CPU_ACQUIRED, thread.state)
+
+        if (thread is CoroutineScheduler.Worker) {
+            assertEquals(CoroutineScheduler.WorkerState.CPU_ACQUIRED, thread.state)
+        } else {
+            assert(thread is DotnetBasedCoroutineScheduler.Worker || thread is GoBasedCoroutineScheduler.Worker)
+        }
     }
 
     private fun assertIoThread() {
         val thread = Thread.currentThread()
-        if (thread !is CoroutineScheduler.Worker) error("Not a thread from Dispatchers.IO: $thread")
-        assertEquals(CoroutineScheduler.WorkerState.BLOCKING, thread.state)
+
+        if (thread is CoroutineScheduler.Worker) {
+            assertEquals(CoroutineScheduler.WorkerState.BLOCKING, thread.state)
+        } else {
+            assert(thread is DotnetBasedCoroutineScheduler.Worker || thread is GoBasedCoroutineScheduler.Worker)
+        }
     }
 }

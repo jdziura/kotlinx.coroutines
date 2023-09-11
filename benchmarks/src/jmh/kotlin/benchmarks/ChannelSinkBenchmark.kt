@@ -17,7 +17,7 @@ import kotlin.coroutines.*
 @State(Scope.Benchmark)
 @Fork(1)
 open class ChannelSinkBenchmark : ParametrizedDispatcherBase() {
-    @Param("scheduler", "fjp", "go_scheduler, dotnet_scheduler")
+    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler")
     override var dispatcher: String = "fjp"
 
     private val tl = ThreadLocal.withInitial({ 42 })

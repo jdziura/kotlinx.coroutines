@@ -46,7 +46,7 @@ open class ForkJoinBenchmark : ParametrizedDispatcherBase() {
 
     lateinit var coefficients: LongArray
 
-    @Param("scheduler", "fjp", "go_scheduler, dotnet_scheduler", "ftp_1", "ftp_8")
+    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler", "ftp_1", "ftp_8")
     override var dispatcher: String = "fjp"
 
     @Setup

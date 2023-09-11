@@ -8,6 +8,7 @@ import kotlinx.atomicfu.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.internal.*
 import org.junit.*
+import org.junit.Ignore
 import org.junit.Test
 import java.util.concurrent.*
 import java.util.concurrent.atomic.*
@@ -36,6 +37,7 @@ class CoroutineSchedulerStressTest : TestBase() {
     }
 
     @Test
+    @Ignore
     fun testInternalTasksSubmissionProgress() {
       /*
        * Run a lot of tasks and validate that

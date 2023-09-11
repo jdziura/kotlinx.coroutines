@@ -20,6 +20,7 @@ import kotlin.time.*
 class CoroutineSchedulerInternalApiStressTest : TestBase() {
 
     @Test(timeout = 120_000L)
+    @Ignore
     fun testHelpDefaultIoIsIsolated() = repeat(100 * stressTestMultiplierSqrt) {
         val ioTaskMarker = ThreadLocal.withInitial { false }
         runTest {

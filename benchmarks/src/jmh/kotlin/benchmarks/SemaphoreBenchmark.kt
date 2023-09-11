@@ -19,7 +19,7 @@ import java.util.concurrent.*
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
 open class SemaphoreBenchmark {
-    @Param("FORK_JOIN", "KOTLIN_DEFAULT", "GO_BASED, DOTNET_BASED")
+    @Param("FORK_JOIN", "KOTLIN_DEFAULT", "GO_BASED", "DOTNET_BASED")
     private var _1_dispatcher: SemaphoreBenchDispatcherCreator = SemaphoreBenchDispatcherCreator.FORK_JOIN
 
     @Param("0", "1000")
