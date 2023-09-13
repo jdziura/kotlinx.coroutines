@@ -17,7 +17,7 @@ import java.util.concurrent.*
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Benchmark)
 open class FlatMapMergeBenchmark : ParametrizedDispatcherBase() {
-    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler")
+    @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp")
     override var dispatcher: String = "fjp"
 
     // Note: tests only absence of contention on downstream

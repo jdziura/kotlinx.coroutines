@@ -21,7 +21,7 @@ import benchmarks.flow.scrabble.flow as unsafeFlow
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Benchmark)
 open class TakeBenchmark : ParametrizedDispatcherBase() {
-    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler")
+    @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp")
     override var dispatcher: String = "fjp"
 
     @Param("1", "10", "100", "1000")

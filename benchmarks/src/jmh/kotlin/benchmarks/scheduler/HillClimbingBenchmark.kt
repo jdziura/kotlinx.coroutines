@@ -19,7 +19,7 @@ import java.util.concurrent.*
 @State(Scope.Benchmark)
 open class HillClimbingBenchmark : ParametrizedDispatcherBase() {
 
-    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler")
+    @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp")
     override var dispatcher: String = "fjp"
 
     private val tasksWidth = 100

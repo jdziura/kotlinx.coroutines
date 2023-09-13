@@ -17,7 +17,7 @@ import java.util.concurrent.*
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
 open class CombineFlowsBenchmark : ParametrizedDispatcherBase() {
-    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler")
+    @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp")
     override var dispatcher: String = "fjp"
 
     @Param("10", "100", "1000")

@@ -61,7 +61,7 @@ open class ConcurrentStatefulActorBenchmark : ParametrizedDispatcherBase() {
     @Param("1024", "8192")
     var stateSize: Int = -1
 
-    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler")
+    @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp")
     override var dispatcher: String = "fjp"
 
     @Benchmark

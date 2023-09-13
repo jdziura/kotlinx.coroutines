@@ -53,7 +53,7 @@ open class StatefulAsyncBenchmark : ParametrizedDispatcherBase() {
     @Param("1", "8", "16")
     var jobsCount = 1
 
-    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler", "ftp_1")
+    @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp", "ftp_1")
     override var dispatcher: String = "fjp"
 
     @Volatile

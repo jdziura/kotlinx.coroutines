@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
 @State(Scope.Benchmark)
 @Fork(1)
 open class FlowFlattenMergeBenchmark : ParametrizedDispatcherBase() {
-    @Param("scheduler", "fjp", "go_scheduler", "dotnet_scheduler")
+    @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp")
     override var dispatcher: String = "fjp"
 
     @Param
