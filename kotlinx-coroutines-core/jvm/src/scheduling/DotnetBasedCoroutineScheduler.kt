@@ -26,17 +26,22 @@ internal const val ENABLE_STARVATION_DETECTION = false
 
 // If enabled, tasks added to local queues will have to wait for a small period of time until they
 // can be stealable. Works only for kotlin queues.
-internal const val ENABLE_MIN_DELAY_UNTIL_STEALING = true
+internal const val ENABLE_MIN_DELAY_UNTIL_STEALING = false
 
 // If set to true, there could be up to CPU-count active thread requests (entering ensureThreadRequested()).
 // Otherwise, only 1 request is allowed at a time.
 internal const val ENABLE_CONCURRENT_THREAD_REQUESTS = false
 
+// If set to true, scheduler will be allowed to reduce number of threads to 1 (or 1 + number of blocking tasks)
+// Otherwise it will keep a lower bound of corePoolSize threads.
+// Enabling this option is useful to allow Hill Climber reducing number of threads very low if it is optimal.
+internal const val IGNORE_MIN_THREADS = false
+
 // If false, will use ported .NET implementation
 internal const val USE_KOTLIN_LOCAL_QUEUES = false
 
 // If false, will use JAVA ConcurrentLinkedQueue
-internal const val USE_KOTLIN_GLOBAL_QUEUE = true
+internal const val USE_KOTLIN_GLOBAL_QUEUE = false
 
 // If true, uses simple spinlock inside local queues for local queues.
 // Otherwise, uses reentrant lock.
@@ -152,9 +157,14 @@ internal class DotnetBasedCoroutineScheduler(
     private val targetThreadsForBlockingAdjustment: Int
         inline get() {
             return if (numBlockingTasks <= 0) {
-                corePoolSize
+                if (IGNORE_MIN_THREADS) 1 else corePoolSize
             } else {
-                min(corePoolSize + numBlockingTasks, maxPoolSize)
+                if (IGNORE_MIN_THREADS) {
+                    min(1 + numBlockingTasks, maxPoolSize)
+                }
+                else {
+                    min(corePoolSize + numBlockingTasks, maxPoolSize)
+                }
             }
         }
 
@@ -285,7 +295,6 @@ internal class DotnetBasedCoroutineScheduler(
             globalQueue.addLast(task)
         } else {
             globalQueueJava.add(task)
-            true
         }
     }
 
@@ -836,6 +845,7 @@ internal class DotnetBasedCoroutineScheduler(
             while (true) {
                 val task = pollLocalQueue() ?: break
                 addToGlobalQueue(task)
+                ensureThreadRequested()
             }
         }
 
@@ -892,8 +902,8 @@ internal class DotnetBasedCoroutineScheduler(
         private fun tryTerminateWorker() {
             synchronized(workers) {
                 if (isTerminated) return
-                if (createdWorkers.value <= corePoolSize)
-                    if (!workerCtl.compareAndSet(PARKED, TERMINATED)) return
+                if (!workerCtl.compareAndSet(CLAIMED, TERMINATED)) return
+
                 val oldIndex = indexInArray
                 indexInArray = 0
 
@@ -948,7 +958,7 @@ internal class DotnetBasedCoroutineScheduler(
 
                 if (firstLoop) {
                     // A task was successfully dequeued, and there may be more tasks to process. Request a thread to
-                    // parallelize processing of tasks, befor`e processing more. Following this, it is the
+                    // parallelize processing of tasks, before processing more. Following this, it is the
                     // responsibility of the new thread and other enqueuing work to request more threads as necessary.
                     // The parallelization may be necessary here for correctness if the task blocks for some
                     // reason that may have a dependency on other queued tasks.

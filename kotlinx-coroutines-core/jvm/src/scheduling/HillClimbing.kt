@@ -6,7 +6,6 @@ package kotlinx.coroutines.scheduling
 
 import kotlin.random.Random
 import kotlin.math.*
-import kotlinx.atomicfu.*
 
 internal class HillClimbing(
     private val scheduler: DotnetBasedCoroutineScheduler

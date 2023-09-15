@@ -41,7 +41,7 @@ open class StatefulActorBenchmark : ParametrizedDispatcherBase() {
 
     data class Letter(val message: Any, val sender: SendChannel<Letter>)
 
-    @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp", "ftp_1", "ftp_8")
+    @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp")
     override var dispatcher: String = "fjp"
 
     @Benchmark
