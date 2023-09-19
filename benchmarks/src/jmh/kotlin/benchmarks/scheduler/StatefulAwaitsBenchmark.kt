@@ -50,7 +50,7 @@ open class StatefulAsyncBenchmark : ParametrizedDispatcherBase() {
     private val jobSuspensions = 2 // multiplicative factor for throughput
 
     // it's useful to have more jobs than cores so run queue always will be non empty
-    @Param("1", "8", "16")
+    @Param("1", "8", "16", "32")
     var jobsCount = 1
 
     @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp", "ftp_1")

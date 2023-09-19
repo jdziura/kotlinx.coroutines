@@ -126,7 +126,6 @@ internal class WorkStealingQueue {
                 // No race should be possible. We can retrieve stolen element.
                 val idx = tail and mask
                 val task = array[idx]
-                require(task != null)
                 array[idx] = null
                 return task
             }
@@ -139,7 +138,6 @@ internal class WorkStealingQueue {
                     // We won a race and can retrieve element
                     val idx = tail and mask
                     val task = array[idx]
-                    require(task != null)
                     array[idx] = null
                     return task
                 }
@@ -177,7 +175,6 @@ internal class WorkStealingQueue {
                     // No race should be possible. We can retrieve stolen element.
                     val idx = head and mask
                     val task = array[idx]
-                    require(task != null)
                     array[idx] = null
                     return ChannelResult.success(task)
                 }
