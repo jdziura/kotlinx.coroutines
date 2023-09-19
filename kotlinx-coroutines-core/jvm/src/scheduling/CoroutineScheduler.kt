@@ -26,7 +26,7 @@ internal const val ENABLE_HILL_CLIMBING = true
 /**
  * If enabled, Gate Thread occasionally injects a thread if no work has been done for this time period.
  */
-internal const val ENABLE_STARVATION_DETECTION = true
+internal const val ENABLE_STARVATION_DETECTION = false
 
 /**
  * If enabled, tasks added to local queues will have to wait for a short period of time until they
@@ -46,7 +46,7 @@ internal const val ENABLE_CONCURRENT_THREAD_REQUESTS = false
  * If set to false, it will keep a lower bound of 'corePoolSize' threads. Enabling this option is useful to allow
  * the Hill Climber to reduce the number of threads very low if it is determined to be optimal.
  */
-internal const val IGNORE_MIN_THREADS = false
+internal const val IGNORE_MIN_THREADS = true
 
 /**
  * If set to false, the code will use the ported .NET implementation.
@@ -140,7 +140,7 @@ internal class CoroutineScheduler(
      * State variable that holds the current thread counts:
      *   - Number of active workers (processing work).
      *   - Number of created workers (including active and those waiting for permits).
-     *   - Goal number of threads (adjusted by Hill Climbing algorithm).
+     *   - Goal number of threads (adjusted by hill climbing algorithm).
      *
      * By default, the goal is set to match the number of CPU cores.
      */
@@ -217,7 +217,7 @@ internal class CoroutineScheduler(
     val isTerminated: Boolean inline get() = _isTerminated.value
 
     /**
-     * Returns a lower bound on threads goal (for example, to use by Hill Climbing algorithm).
+     * Returns a lower bound on threads goal (for example, to use by hill climbing algorithm).
      * This property should be accessed only when the 'threadAdjustmentLock' is held.
      */
     val minThreadsGoal: Int
@@ -367,7 +367,9 @@ internal class CoroutineScheduler(
         }
     }
 
-    // Requests for a thread to process work. Restricts number of concurrent request, to avoid over-parallelization.
+    /**
+     * Requests for a thread to process work. Restricts number of concurrent request, to avoid over-parallelization.
+     */
     private fun ensureThreadRequested() {
         if (ENABLE_CONCURRENT_THREAD_REQUESTS) {
             // Restricts the number of requests to number of available processors at a time.
@@ -386,7 +388,9 @@ internal class CoroutineScheduler(
         }
     }
 
-    // Notifies that a thread request has been satisfied, and allows another requests to be processed.
+    /**
+     * Notifies that a thread request has been satisfied, and allows other requests to be processed.
+     */
     private fun markThreadRequestSatisfied() {
         if (ENABLE_CONCURRENT_THREAD_REQUESTS) {
             numOutstandingThreadRequests.loop { cnt ->
@@ -409,7 +413,9 @@ internal class CoroutineScheduler(
         ensureGateThreadRunning()
     }
 
-    // Calls hill climbing algorithm to potentially adjust number of workers.
+    /**
+     * Calls hill climbing algorithm to potentially adjust number of workers.
+     */
     private fun adjustMaxWorkersActive() {
         if (!threadAdjustmentLock.tryLock()) {
             // The lock is held by someone else, they will take care of this for us.
@@ -526,7 +532,9 @@ internal class CoroutineScheduler(
         }
     }
 
-    // Wake up or create gate thread if needed.
+    /**
+     * Wake up or create gate thread if needed.
+     */
     private fun ensureGateThreadRunning() {
         if (gateThreadRunningState.value != getRunningStateForNumRuns(MAX_RUNS)) {
             val numRunsMask: Int = gateThreadRunningState.getAndSet(getRunningStateForNumRuns(MAX_RUNS))
@@ -806,9 +814,10 @@ internal class CoroutineScheduler(
             }
         }
 
-        // Returns if the current thread should stop processing work for the scheduler.
-        // A thread should stop processing work when work remains only when
-        // there are more worker threads in the scheduler than we currently want.
+        /**
+         * Determines whether the current thread should stop processing tasks for the scheduler.
+         * A thread should stop processing tasks when there are more worker threads in the scheduler than desired.
+         */
         private fun shouldStopProcessingWorkNow(): Boolean {
             threadCounts.loop { counts ->
                 // When there are more threads processing work than the thread count goal, it may have been decided
@@ -826,14 +835,16 @@ internal class CoroutineScheduler(
             }
         }
 
-        // Checks if we should call hill climbing algorithm to potentially change
-        // number of workers.
+        /**
+         * Determines whether we should invoke the hill climbing algorithm and potentially adjust
+         * the number of worker threads.
+         */
         private fun shouldAdjustMaxWorkersActive(currentTimeMs: Long): Boolean {
             if (!ENABLE_HILL_CLIMBING) {
                 return false
             }
 
-            // Not enough time passed
+            // Not enough time passed.
             if (currentTimeMs < nextCompletedWorkRequestsTime) {
                 return false
             }
@@ -847,12 +858,14 @@ internal class CoroutineScheduler(
                 return false
             }
 
-            // Skip hill climbing when there is a pending blocking adjustment. Hill climbing may
+            // Skip hill climbing when there is a pending blocking adjustment. hill climbing may
             // otherwise bypass the blocking adjustment heuristics.
             return pendingBlockingAdjustment == PendingBlockingAdjustment.None
         }
 
-        // Acquires permit, thus being able to process work.
+        /**
+         * Acquires a permit, granting permission to process work.
+         */
         private fun tryAcquirePermit(spinWait: Boolean): Boolean {
             return try {
                 if (USE_DOTNET_SEMAPHORE) {
@@ -874,8 +887,10 @@ internal class CoroutineScheduler(
             }
         }
 
-        // Transfer all the work to global queue. It's useful when the thread is finishing dispatching early,
-        // with more work in its local queue.
+        /**
+         * Transfer all the work to global queue. It's useful when the thread is finishing dispatching early,
+         * with more work in its local queue.
+         */
         private fun transferLocalWork() {
             while (true) {
                 val task = pollLocalQueue() ?: break
@@ -901,10 +916,12 @@ internal class CoroutineScheduler(
             return result.getOrNull()
         }
 
-        // Invoked when the thread's wait timed out. We are potentially shutting down this thread.
-        // We are going to decrement the number of existing threads to no longer include this one
-        // and then change the max number of threads in the thread pool to reflect that we don't need as many
-        // as we had. Finally, we are going to tell hill climbing that we changed the max number of threads.
+        /**
+         * Invoked when the thread's wait timed out. We are potentially shutting down this thread.
+         * We are going to decrement the number of existing threads to no longer include this one
+         * and then change the max number of threads in the thread pool to reflect that we don't need as many
+         * as we had. Finally, we are going to tell hill climbing that we changed the max number of threads.
+         */
         private fun shouldExitWorker(): Boolean {
             threadAdjustmentLock.lock()
             try {
@@ -932,18 +949,11 @@ internal class CoroutineScheduler(
             }
         }
 
-        // Reduce the number of working workers by one, but maybe add back a worker (possibly this thread)
-        // if a thread request comes in while we are marking this thread as not working.
+        /**
+         * Reduce the number of working workers by one, but maybe add back a worker (possibly this thread)
+         * if a thread request comes in while we are marking this thread as not working.
+         */
         private fun removeWorkingWorker() {
-            // [TODO] Verify if atomic decrement would be sufficient.
-//            while (true) {
-//                val counts = threadCounts.value
-//                val newCounts = counts.decrementNumProcessingWork()
-//                if (threadCounts.compareAndSet(counts, newCounts)) {
-//                    break
-//                }
-//            }
-
             decrementNumProcessingWork()
 
             // It's possible that we decided we had thread requests just before a request came in,
@@ -986,16 +996,18 @@ internal class CoroutineScheduler(
             }
             return (r and Int.MAX_VALUE) % upperBound
         }
-        
-        // Returns true if this thread did as much work as was available.
-        // Returns false if this thread has stopped early.
+
+        /**
+         * Returns true if this thread did as much work as was available.
+         * Returns false if this thread has stopped early.
+         */
         private fun processBatchOfWork(): Boolean {
             // Before dequeue of the first work item, acknowledge that the thread request has been satisfied.
             markThreadRequestSatisfied()
 
             var firstLoop = true
 
-            // Loop until our quantum expires or there is no work.
+            // Loop until there is no work or should exit early.
             while (true) {
                 val workItem = findTask() ?:
                     if (ENABLE_MIN_DELAY_UNTIL_STEALING && minDelayUntilStealableTasksNs != 0L) {
@@ -1024,7 +1036,7 @@ internal class CoroutineScheduler(
                 executeWorkItem(workItem)
 
                 // Notify the scheduler that we executed this task. This is also our opportunity to ask
-                // whether Hill Climbing wants us to return the thread to the pool or not.
+                // whether hill climbing wants us to return the thread to the pool or not.
                 val currentTickCount = System.currentTimeMillis()
                 if (!notifyWorkItemComplete(currentTickCount)) {
                     // This thread is being parked and may remain inactive for a while. Transfer any thread-local work items
