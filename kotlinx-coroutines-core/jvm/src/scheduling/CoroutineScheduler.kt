@@ -132,36 +132,60 @@ internal class CoroutineScheduler(
     }
 
     /**
-     * The number of threads that is guaranteed to be available for CPU tasks.
+     * The minimum number of threads guaranteed to be available for CPU tasks.
      */
     private val lowerThreadsBound = if (IGNORE_MIN_THREADS) 1 else corePoolSize
 
     /**
-     * `threadCounts` is a state that holds current:
-     *    – number of active workers (processing work)
-     *    – number of created workers (including active and waiting for permit)
-     *    – goal number of threads (adjusted by Hill Climbing algorithm)
+     * State variable that holds the current thread counts:
+     *   - Number of active workers (processing work).
+     *   - Number of created workers (including active and those waiting for permits).
+     *   - Goal number of threads (adjusted by Hill Climbing algorithm).
      *
-     * By default, the goal is set to the number of CPU cores.
+     * By default, the goal is set to match the number of CPU cores.
      */
     private val startingThreadCountsValue = 0L.setNumThreadsGoal(corePoolSize)
     private val threadCounts = atomic(startingThreadCountsValue)
 
     /**
-     * Holds the number of current thread requests. Used for restricting maximum number of concurrent requests,
-     * to reduce contention.
+     * A counter for the number of outstanding thread requests. Helps limit the maximum
+     * number of concurrent requests to reduce contention.
      */
     private val numOutstandingThreadRequests = atomic(0)
+
+    /**
+     * The count of workers requested to execute tasks. A worker must take a request
+     * before processing a batch of work.
+     */
     private val numRequestedWorkers = atomic(0)
-    private val _isTerminated = atomic(false)
+
+    /**
+     * Current state indicator for the Gate Thread. Used to ensuring that Gate Thread is running when needed.
+     */
     private val gateThreadRunningState = atomic(0)
+
+    /**
+     * Total number of tasks completed by worker threads.
+     */
     private val completionCount = atomic(0)
+
+    /**
+     * Number of workers created. While it may overlap with threadCounts, it is required by the workers array.
+     */
     private val createdWorkers = atomic(0)
+
+    /**
+     * Helper structures used by the Gate Thread for periodic checks and signaling.
+     */
     private val runGateThreadEvent = AutoResetEvent(true)
     private val delayEvent = AutoResetEvent(false)
     private val delayHelper = DelayHelper()
+
     private val threadAdjustmentLock = ReentrantLock()
 
+    /**
+     * Semaphore is used to restrict the number of threads allowed to process work to a specific number of permits.
+     */
     private val semaphore = Semaphore(0)
     private val semaphoreDotnet = LowLevelLifoSemaphore(0, SEMAPHORE_SPIN_COUNT)
 
@@ -188,9 +212,8 @@ internal class CoroutineScheduler(
     @JvmField
     val globalQueueJava = ConcurrentLinkedQueue<Task>()
 
-    @JvmField
-    val workStealingQueueList = WorkStealingQueueList()
 
+    private val _isTerminated = atomic(false)
     val isTerminated: Boolean inline get() = _isTerminated.value
 
     /**
@@ -684,12 +707,8 @@ internal class CoroutineScheduler(
     }
 
     internal inner class Worker private constructor() : Thread() {
-        val localQueueDotnet = WorkStealingQueue()
         init {
             isDaemon = true
-            if (!USE_KOTLIN_LOCAL_QUEUES) {
-                workStealingQueueList.add(localQueueDotnet)
-            }
         }
 
         var indexInArray = 0
@@ -704,6 +723,8 @@ internal class CoroutineScheduler(
 
         @JvmField
         val localQueue: WorkQueue = WorkQueue()
+
+        val localQueueDotnet = WorkStealingQueue()
 
         private val stolenTask: ObjectRef<Task?> = ObjectRef()
         private var rngState = Random.nextInt()
