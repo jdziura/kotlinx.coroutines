@@ -83,9 +83,6 @@ internal class HillClimbing(
         private const val THROUGHPUT_ERROR_SMOOTHING_FACTOR = DEFAULT_THROUGHPUT_ERROR_SMOOTHING_FACTOR
         private const val GAIN_EXPONENT = DEFAULT_GAIN_EXPONENT / 2.0
         private const val MAX_SAMPLE_ERROR = DEFAULT_MAX_SAMPLE_ERROR
-
-        private const val NANO_TO_SEC = 1_000_000_000L
-        private const val INF_TIME = NANO_TO_SEC
     }
 
     private val samples = DoubleArray(SAMPLES_TO_MEASURE)
@@ -99,10 +96,6 @@ internal class HillClimbing(
     private var currentControlSetting = 0.0
     private var secondsElapsedSinceLastChange = 0.0
     private var completionsSinceLastChange = 0
-
-    // Avg number of nanoseconds to complete a task
-    @Volatile private var _estimatedAverageCompletionTime = INF_TIME
-    val estimatedAverageCompletionTime: Long inline get() = _estimatedAverageCompletionTime
 
     fun update(currentThreadCount: Int, pSampleDurationSeconds: Double, pNumCompletions: Int): Pair<Int, Int> {
         // If someone changed the thread count without telling us, update our records accordingly.
@@ -155,14 +148,6 @@ internal class HillClimbing(
         samples[sampleIndex] = throughput
         threadCounts[sampleIndex] = currentThreadCount.toDouble()
         totalSamples++
-
-        // Update recent throughput
-        val newEstimatedAverageCompletionTime = if (numCompletions == 0) {
-            INF_TIME
-        } else {
-            ((NANO_TO_SEC * currentThreadCount) / throughput).toLong()
-        }
-        _estimatedAverageCompletionTime = newEstimatedAverageCompletionTime
 
         var ratio = Complex(0.0, 0.0)
         var confidence = 0.0

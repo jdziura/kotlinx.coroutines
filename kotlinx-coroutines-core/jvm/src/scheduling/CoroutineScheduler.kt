@@ -204,7 +204,7 @@ internal class CoroutineScheduler(
     private var numBlockingTasks = 0
 
     @JvmField
-    val workers = ResizableAtomicArray<CoroutineScheduler.Worker>((corePoolSize + 1) * 2)
+    val workers = ResizableAtomicArray<Worker>((corePoolSize + 1) * 2)
 
     @JvmField
     val globalQueue = GlobalQueue()
@@ -494,6 +494,12 @@ internal class CoroutineScheduler(
                 .setNumProcessingWork(newNumProcessingWork)
                 .setNumExistingThreads(newNumExistingThreads)
 
+            var newCounts2 = counts;
+            newCounts2 = newCounts2.setNumProcessingWork(newNumProcessingWork)
+            newCounts2 = newCounts2.setNumExistingThreads(newNumExistingThreads)
+
+            require(newCounts == newCounts2)
+
             if (threadCounts.compareAndSet(counts, newCounts)) {
                 break
             }
@@ -599,7 +605,7 @@ internal class CoroutineScheduler(
             return (0L to false)
         }
 
-        val configuredMaxThreadsWithoutDelay = min(corePoolSize + threadsToAddWithoutDelay, maxPoolSize)
+        val configuredMaxThreadsWithoutDelay = min(lowerThreadsBound + threadsToAddWithoutDelay, maxPoolSize)
 
         do {
             val maxThreadsGoalWithoutDelay = max(configuredMaxThreadsWithoutDelay, min(counts.numExistingThreads, maxPoolSize))
@@ -895,6 +901,7 @@ internal class CoroutineScheduler(
             while (true) {
                 val task = pollLocalQueue() ?: break
                 addToGlobalQueue(task)
+                ensureThreadRequested()
             }
         }
 
@@ -954,7 +961,12 @@ internal class CoroutineScheduler(
          * if a thread request comes in while we are marking this thread as not working.
          */
         private fun removeWorkingWorker() {
-            decrementNumProcessingWork()
+            while (true) {
+                val counts = threadCounts.value;
+                val newCounts = counts.decrementNumProcessingWork()
+                if (threadCounts.compareAndSet(counts, newCounts)) break
+            }
+//            decrementNumProcessingWork()
 
             // It's possible that we decided we had thread requests just before a request came in,
             // but reduced the worker count *after* the request came in.  In this case, we might
