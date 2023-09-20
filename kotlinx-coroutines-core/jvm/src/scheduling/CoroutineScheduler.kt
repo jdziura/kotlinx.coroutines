@@ -46,7 +46,7 @@ internal const val ENABLE_CONCURRENT_THREAD_REQUESTS = false
  * If set to false, it will keep a lower bound of 'corePoolSize' threads. Enabling this option is useful to allow
  * the Hill Climber to reduce the number of threads very low if it is determined to be optimal.
  */
-internal const val IGNORE_MIN_THREADS = true
+internal const val IGNORE_MIN_THREADS = false
 
 /**
  * If set to false, the code will use the ported .NET implementation.
@@ -961,12 +961,7 @@ internal class CoroutineScheduler(
          * if a thread request comes in while we are marking this thread as not working.
          */
         private fun removeWorkingWorker() {
-            while (true) {
-                val counts = threadCounts.value;
-                val newCounts = counts.decrementNumProcessingWork()
-                if (threadCounts.compareAndSet(counts, newCounts)) break
-            }
-//            decrementNumProcessingWork()
+            decrementNumProcessingWork()
 
             // It's possible that we decided we had thread requests just before a request came in,
             // but reduced the worker count *after* the request came in.  In this case, we might
