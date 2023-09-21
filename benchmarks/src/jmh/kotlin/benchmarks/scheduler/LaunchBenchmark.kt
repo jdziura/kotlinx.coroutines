@@ -21,8 +21,7 @@ import java.util.concurrent.*
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Benchmark)
 open class LaunchBenchmark : ParametrizedDispatcherBase() {
-
-    @Param("scheduler", "fjp")
+    @Param("DotnetBasedQueues", "DotnetBasedQueuesWithDelays", "KotlinBasedQueues", "KotlinBasedQueuesWithDelays", "JavaBasedQueue", "JavaBasedDeque")
     override var dispatcher: String = "fjp"
 
     private val jobsToLaunch = 100

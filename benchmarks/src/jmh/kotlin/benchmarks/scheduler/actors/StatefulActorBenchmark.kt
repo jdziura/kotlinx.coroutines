@@ -41,7 +41,7 @@ open class StatefulActorBenchmark : ParametrizedDispatcherBase() {
 
     data class Letter(val message: Any, val sender: SendChannel<Letter>)
 
-    @Param("fjp", "ftp_1", "ftp_8", "scheduler")
+    @Param("DotnetBasedQueues", "DotnetBasedQueuesWithDelays", "KotlinBasedQueues", "KotlinBasedQueuesWithDelays", "JavaBasedQueue", "JavaBasedDeque")
     override var dispatcher: String = "fjp"
 
     @Benchmark

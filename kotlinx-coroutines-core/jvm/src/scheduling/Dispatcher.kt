@@ -9,12 +9,13 @@ import kotlinx.coroutines.internal.*
 import java.util.concurrent.*
 import kotlin.coroutines.*
 
-// Instance of Dispatchers.Default
-internal object DefaultScheduler : SchedulerCoroutineDispatcher(
+internal open class DefaultSchedulerBase(
+    queueType: CoroutineScheduler.QueueType = CoroutineScheduler.QueueType.DotnetBased
+) : SchedulerCoroutineDispatcher(
     CORE_POOL_SIZE, MAX_POOL_SIZE,
-    IDLE_WORKER_KEEP_ALIVE_NS, DEFAULT_SCHEDULER_NAME
+    IDLE_WORKER_KEEP_ALIVE_NS, DEFAULT_SCHEDULER_NAME,
+    queueType
 ) {
-
     @ExperimentalCoroutinesApi
     override fun limitedParallelism(parallelism: Int): CoroutineDispatcher {
         parallelism.checkParallelism()
@@ -34,6 +35,9 @@ internal object DefaultScheduler : SchedulerCoroutineDispatcher(
 
     override fun toString(): String = "Dispatchers.Default"
 }
+
+// Instance of Dispatchers.Default
+internal object DefaultScheduler : DefaultSchedulerBase()
 
 // The unlimited instance of Dispatchers.IO that utilizes all the threads CoroutineScheduler provides
 private object UnlimitedIoScheduler : CoroutineDispatcher() {
@@ -98,6 +102,7 @@ internal open class SchedulerCoroutineDispatcher(
     private val maxPoolSize: Int = MAX_POOL_SIZE,
     private val idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
     private val schedulerName: String = "CoroutineScheduler",
+    private val queueType: CoroutineScheduler.QueueType = CoroutineScheduler.QueueType.DotnetBased
 ) : ExecutorCoroutineDispatcher() {
 
     override val executor: Executor
@@ -107,7 +112,7 @@ internal open class SchedulerCoroutineDispatcher(
     private var coroutineScheduler = createScheduler()
 
     private fun createScheduler() =
-        CoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName)
+        CoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName, queueType)
 
     override fun dispatch(context: CoroutineContext, block: Runnable): Unit = coroutineScheduler.dispatch(block)
 

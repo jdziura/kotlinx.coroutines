@@ -40,7 +40,7 @@ open class CycledActorsBenchmark : ParametrizedDispatcherBase() {
         val NO_CHANNEL = Channel<Letter>(0)
     }
 
-    @Param("fjp", "ftp_1", "scheduler")
+    @Param("DotnetBasedQueues", "DotnetBasedQueuesWithDelays", "KotlinBasedQueues", "KotlinBasedQueuesWithDelays", "JavaBasedQueue", "JavaBasedDeque")
     override var dispatcher: String = "fjp"
 
     @Param("1", "1024")

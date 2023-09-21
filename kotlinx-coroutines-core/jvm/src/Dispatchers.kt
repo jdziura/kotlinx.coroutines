@@ -21,6 +21,19 @@ public actual object Dispatchers {
     public actual val Default: CoroutineDispatcher = DefaultScheduler
 
     @JvmStatic
+    public actual val DefaultDotnetQueues: CoroutineDispatcher = DefaultSchedulerBase(CoroutineScheduler.QueueType.DotnetBased)
+    @JvmStatic
+    public actual val DefaultDotnetQueuesWithDelays: CoroutineDispatcher = DefaultSchedulerBase(CoroutineScheduler.QueueType.DotnetBasedWithDelays)
+    @JvmStatic
+    public actual val DefaultKotlinQueues: CoroutineDispatcher = DefaultSchedulerBase(CoroutineScheduler.QueueType.KotlinBased)
+    @JvmStatic
+    public actual val DefaultKotlinQueuesWithDelays: CoroutineDispatcher = DefaultSchedulerBase(CoroutineScheduler.QueueType.KotlinBasedWithDelays)
+    @JvmStatic
+    public actual val DefaultJavaConcurrentLinkedQueue: CoroutineDispatcher = DefaultSchedulerBase(CoroutineScheduler.QueueType.JavaConcurrentLinkedQueue)
+    @JvmStatic
+    public actual val DefaultJavaConcurrentLinkedDeque: CoroutineDispatcher = DefaultSchedulerBase(CoroutineScheduler.QueueType.JavaConcurrentLinkedDeque)
+
+    @JvmStatic
     public actual val Main: MainCoroutineDispatcher get() = MainDispatcherLoader.dispatcher
 
     @JvmStatic

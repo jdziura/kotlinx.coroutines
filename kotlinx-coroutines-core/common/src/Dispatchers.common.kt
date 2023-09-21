@@ -74,4 +74,11 @@ public expect object Dispatchers {
      * the value of [CoroutineStart.UNDISPATCHED].
      */
     public val Unconfined: CoroutineDispatcher
+
+    public val DefaultDotnetQueues: CoroutineDispatcher
+    public val DefaultDotnetQueuesWithDelays: CoroutineDispatcher
+    public val DefaultKotlinQueues: CoroutineDispatcher
+    public val DefaultKotlinQueuesWithDelays: CoroutineDispatcher
+    public val DefaultJavaConcurrentLinkedQueue: CoroutineDispatcher
+    public val DefaultJavaConcurrentLinkedDeque: CoroutineDispatcher
 }

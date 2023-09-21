@@ -31,6 +31,26 @@ abstract class ParametrizedDispatcherBase : CoroutineScope {
             dispatcher == "scheduler" -> {
                 Dispatchers.Default
             }
+
+            dispatcher == "DotnetBasedQueues" -> {
+                Dispatchers.DefaultDotnetQueues
+            }
+            dispatcher == "DotnetBasedQueuesWithDelays" -> {
+                Dispatchers.DefaultDotnetQueuesWithDelays
+            }
+            dispatcher == "KotlinBasedQueues" -> {
+                Dispatchers.DefaultKotlinQueues
+            }
+            dispatcher == "KotlinBasedQueuesWithDelays" -> {
+                Dispatchers.DefaultKotlinQueuesWithDelays
+            }
+            dispatcher == "JavaBasedQueue" -> {
+                Dispatchers.DefaultJavaConcurrentLinkedQueue
+            }
+            dispatcher == "JavaBasedDeque" -> {
+                Dispatchers.DefaultJavaConcurrentLinkedDeque
+            }
+
             dispatcher.startsWith("ftp") -> {
                 newFixedThreadPoolContext(dispatcher.substring(4).toInt(), dispatcher).also { closeable = it }
             }
