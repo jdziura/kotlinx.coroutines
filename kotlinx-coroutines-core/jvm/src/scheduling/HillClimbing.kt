@@ -76,7 +76,7 @@ internal class HillClimbing(
         private const val SAMPLES_TO_MEASURE = WAVE_PERIOD * 8
         private const val TARGET_THROUGHPUT_RATIO = DEFAULT_TARGET_THROUGHPUT_RATIO
         private const val TARGET_SIGNAL_TO_NOISE_RATIO = DEFAULT_TARGET_SIGNAL_TO_NOISE_RATIO
-        private const val MAX_CHANGE_PER_SECOND = DEFAULT_MAX_CHANGE_PER_SECOND * 3
+        private const val MAX_CHANGE_PER_SECOND = 10
         private const val MAX_CHANGE_PER_SAMPLE = DEFAULT_MAX_CHANGE_PER_SAMPLE
         private const val SAMPLE_INTERVAL_MS_LOW = DEFAULT_SAMPLE_INTERVAL_MS_LOW
         private const val SAMPLE_INTERVAL_MS_HIGH = DEFAULT_SAMPLE_INTERVAL_MS_HIGH

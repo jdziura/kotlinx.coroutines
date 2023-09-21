@@ -15,6 +15,7 @@ internal const val MASK = BUFFER_CAPACITY - 1 // 128 by default
 
 internal const val TASK_STOLEN = -1L
 internal const val NOTHING_TO_STEAL = -2L
+internal const val MISSED_STEAL = -3L
 
 internal typealias StealingMode = Int
 internal const val STEAL_ANY: StealingMode = 3
@@ -43,7 +44,9 @@ internal inline val Task.maskForStealingMode: Int
  * Indeed, it formally has ABA-problem, but the whole processing logic is written in the way that such ABA is harmless.
  * I have discovered a truly marvelous proof of this, which this KDoc is too narrow to contain.
  */
-internal class WorkQueue {
+internal class WorkQueue(
+    private val delayable: Boolean = true
+) {
 
     /*
      * We read two independent counter here.
@@ -207,10 +210,12 @@ internal class WorkQueue {
             }
 
             // TODO time wraparound ?
-            val time = schedulerTimeSource.nanoTime()
-            val staleness = time - lastScheduled.submissionTime
-            if (staleness < WORK_STEALING_TIME_RESOLUTION_NS) {
-                return WORK_STEALING_TIME_RESOLUTION_NS - staleness
+            if (delayable) {
+                val time = schedulerTimeSource.nanoTime()
+                val staleness = time - lastScheduled.submissionTime
+                if (staleness < WORK_STEALING_TIME_RESOLUTION_NS) {
+                    return WORK_STEALING_TIME_RESOLUTION_NS - staleness
+                }
             }
 
             /*

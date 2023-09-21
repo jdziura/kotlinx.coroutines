@@ -5,33 +5,51 @@
 package kotlinx.coroutines.scheduling
 
 import kotlinx.atomicfu.*
-import kotlinx.coroutines.channels.*
 import kotlinx.coroutines.internal.ReentrantLock
+import java.util.concurrent.ConcurrentLinkedDeque
+import java.util.concurrent.ConcurrentLinkedQueue
+import kotlin.jvm.internal.Ref.ObjectRef
 
-internal class Spinlock {
+internal interface DotnetQueueLock {
+    fun lock()
+    fun tryLock(): Boolean
+    fun unlock()
+}
+
+internal class DotnetQueueSpinLock : DotnetQueueLock {
+    companion object {
+        private const val SPIN_COUNT = 64
+    }
+
     private val flag = atomic(false)
-    fun lock() {
-        while (!flag.compareAndSet(false, true)) {}
+
+    override fun lock() {
+        while (true) {
+            repeat(SPIN_COUNT) {
+                if (flag.compareAndSet(false, true)) return
+            }
+
+            Thread.yield()
+        }
     }
 
-    fun tryLock(): Boolean {
-        return flag.compareAndSet(false, true)
-    }
+    override fun tryLock(): Boolean = flag.compareAndSet(false, true)
 
-    fun unlock() {
+    override fun unlock() {
         flag.value = false
     }
 }
 
-internal class QueueLock {
-    private val spinLock = Spinlock()
-    private val reentrantLock = ReentrantLock()
-    fun lock() = if (USE_DOTNET_QUEUE_SPINLOCK) spinLock.lock() else reentrantLock.lock()
-    fun tryLock() = if (USE_DOTNET_QUEUE_SPINLOCK) spinLock.tryLock() else reentrantLock.tryLock()
-    fun unlock() = if (USE_DOTNET_QUEUE_SPINLOCK) spinLock.unlock() else reentrantLock.unlock()
+internal class DotnetQueueReentrantLock : DotnetQueueLock {
+    private val mutex = ReentrantLock()
+    override fun lock() = mutex.lock()
+    override fun tryLock() = mutex.tryLock()
+    override fun unlock() = mutex.unlock()
 }
 
-internal class WorkStealingQueue {
+internal class WorkStealingQueue(
+    private val delayable: Boolean
+) {
     companion object {
         private const val INITIAL_SIZE = 32
     }
@@ -42,12 +60,15 @@ internal class WorkStealingQueue {
     @Volatile private var headIndex = 0
     @Volatile private var tailIndex = 0
 
-    private val mutex = QueueLock()
+    private val mutex: DotnetQueueLock =
+        if (USE_DOTNET_QUEUE_SPINLOCK) DotnetQueueSpinLock()
+        else DotnetQueueReentrantLock()
+
     private val canSteal: Boolean get() = headIndex < tailIndex
 
     val size: Int get() = tailIndex - headIndex
 
-    fun localPush(task: Task) {
+    fun add(task: Task) {
         var tail = tailIndex
 
         if (tail == Int.MAX_VALUE) {
@@ -109,12 +130,39 @@ internal class WorkStealingQueue {
         }
     }
 
-    fun localPop(): Task? {
+    fun poll(): Task? {
         while (true) {
             var tail = tailIndex
             if (headIndex >= tail) {
-                // Queue empty, return.
-                return null
+                if (delayable) {
+                    // In delayable version, we have to adjust an implementation because of following scenario:
+                    // Another thread tries to steal the only task in queue and increases head early with a lock taken.
+                    // However, the task is not stealable yet, thus it reverts changes and exits. If the owner thread
+                    // is at this point at the code during this time, it assumes that either there are no tasks, or
+                    // a stealer will successfully dequeue the only task. Since it may not happen, we have to acquire
+                    // a lock and check again
+                    try {
+                        mutex.lock()
+
+                        tail = tailIndex - 1
+
+                        if (headIndex <= tail) {
+                            tailIndex = tail
+                            val idx = tail and mask
+                            val task = array[idx]
+                            array[idx] = null
+                            return task
+                        }
+
+                        // There actually are no tasks in queue, return.
+                        return null
+                    } finally {
+                        mutex.unlock()
+                    }
+                } else {
+                    // Queue is definitely empty, return.
+                    return null
+                }
             }
 
             // Decrease tail early to stop from concurrent stealing.
@@ -125,7 +173,6 @@ internal class WorkStealingQueue {
                 // No race should be possible. We can retrieve stolen element.
                 val idx = tail and mask
                 val task = array[idx]
-                require(task != null)
                 array[idx] = null
                 return task
             }
@@ -138,7 +185,6 @@ internal class WorkStealingQueue {
                     // We won a race and can retrieve element
                     val idx = tail and mask
                     val task = array[idx]
-                    require(task != null)
                     array[idx] = null
                     return task
                 }
@@ -152,9 +198,7 @@ internal class WorkStealingQueue {
         }
     }
 
-    // Returns ChannelResult.failure() if we didn't steal and missed.
-    // On success, returns null if queue was empty, or stolen task.
-    fun trySteal(): ChannelResult<Task?> {
+    fun trySteal(stolenTaskRef: ObjectRef<Task?>): Long {
         var missedSteal = false
 
         while (canSteal) {
@@ -165,20 +209,37 @@ internal class WorkStealingQueue {
                 if (!lockTaken) {
                     // There is another thread stealing/popping now, we don't want to interfere.
                     missedSteal = true
-                    continue
+                    break
                 }
 
                 // Increase head early to stop from concurrent local pop.
                 val head = headIndex
                 headIndex = head + 1
 
-                if (head < tailIndex) {
+                val size = tailIndex - head
+
+                if (size > 0) {
                     // No race should be possible. We can retrieve stolen element.
                     val idx = head and mask
                     val task = array[idx]
-                    require(task != null)
+
+                    if (delayable && size == 1) {
+                        // We want to steal last scheduled task. If we care about delay, we need to
+                        // check if sufficient time has passed since submission.
+                        val time = schedulerTimeSource.nanoTime()
+                        require(task != null)
+
+                        val staleness = time - task.submissionTime
+                        if (staleness < WORK_STEALING_TIME_RESOLUTION_NS) {
+                            // We are not stealing and have to restore the head
+                            headIndex = head
+                            return WORK_STEALING_TIME_RESOLUTION_NS - staleness
+                        }
+                    }
+
+                    stolenTaskRef.element = array[idx]
                     array[idx] = null
-                    return ChannelResult.success(task)
+                    return TASK_STOLEN
                 }
 
                 // We lost the race and have to restore the head.
@@ -194,9 +255,59 @@ internal class WorkStealingQueue {
         // there might be additional work to do in this queue and additional
         // thread may have to be woken up to process it.
         return if (missedSteal) {
-            ChannelResult.failure()
+            MISSED_STEAL
         } else {
-            ChannelResult.success(null)
+            NOTHING_TO_STEAL
         }
+    }
+}
+
+internal interface LocalQueue {
+    fun add(task: Task, tailDispatch: Boolean = false): Task?
+    fun poll(): Task?
+    fun trySteal(stolenTaskRef: ObjectRef<Task?>): Long
+}
+
+internal class LocalQueueKotlin(
+    delayable: Boolean = true
+) : LocalQueue {
+    val queue = WorkQueue(delayable)
+    override fun add(task: Task, tailDispatch: Boolean) = queue.add(task, tailDispatch)
+    override fun poll(): Task? = queue.poll()
+    override fun trySteal(stolenTaskRef: ObjectRef<Task?>) = queue.trySteal(STEAL_ANY, stolenTaskRef)
+}
+
+internal class LocalQueueDotnet(
+    delayable: Boolean = false
+) : LocalQueue {
+    val queue = WorkStealingQueue(delayable)
+    override fun add(task: Task, tailDispatch: Boolean): Task? {
+        queue.add(task)
+        return null
+    }
+    override fun poll(): Task? = queue.poll()
+    override fun trySteal(stolenTaskRef: ObjectRef<Task?>) = queue.trySteal(stolenTaskRef)
+}
+
+internal class LocalConcurrentLinkedQueue : LocalQueue {
+    val queue = ConcurrentLinkedQueue<Task>()
+    override fun add(task: Task, tailDispatch: Boolean) = if (queue.add(task)) null else task
+    override fun poll(): Task? = queue.poll()
+    override fun trySteal(stolenTaskRef: ObjectRef<Task?>): Long {
+        val task = queue.poll() ?: return NOTHING_TO_STEAL
+        stolenTaskRef.element = task
+        return TASK_STOLEN
+    }
+}
+
+// poll / steal from different sides of the queue
+internal class LocalConcurrentLinkedDeque : LocalQueue {
+    val queue = ConcurrentLinkedDeque<Task>()
+    override fun add(task: Task, tailDispatch: Boolean) = null.also { queue.addLast(task) }
+    override fun poll(): Task? = queue.pollLast()
+    override fun trySteal(stolenTaskRef: ObjectRef<Task?>): Long {
+        val task = queue.pollFirst() ?: return NOTHING_TO_STEAL
+        stolenTaskRef.element = task
+        return TASK_STOLEN
     }
 }

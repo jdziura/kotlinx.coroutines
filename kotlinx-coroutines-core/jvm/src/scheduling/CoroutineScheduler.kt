@@ -21,18 +21,12 @@ import kotlin.random.Random
  * If enabled, the scheduler dynamically adjusts the number of active worker threads based on
  * current throughput, trying to maximize it with a minimum number of workers.
  */
-internal const val ENABLE_HILL_CLIMBING = true
+internal const val ENABLE_HILL_CLIMBING = false
 
 /**
  * If enabled, Gate Thread occasionally injects a thread if no work has been done for this time period.
  */
 internal const val ENABLE_STARVATION_DETECTION = false
-
-/**
- * If enabled, tasks added to local queues will have to wait for a short period of time until they
- * become stealable. This feature works only with Kotlin queues.
- */
-internal const val ENABLE_MIN_DELAY_UNTIL_STEALING = false
 
 /**
  * If set to true, allows up to CPU-count active thread requests (entering ensureThreadRequested()).
@@ -49,11 +43,6 @@ internal const val ENABLE_CONCURRENT_THREAD_REQUESTS = false
 internal const val IGNORE_MIN_THREADS = false
 
 /**
- * If set to false, the code will use the ported .NET implementation.
- */
-internal const val USE_KOTLIN_LOCAL_QUEUES = false
-
-/**
  * If set to false, the code will use the JAVA ConcurrentLinkedQueue.
  */
 internal const val USE_KOTLIN_GLOBAL_QUEUE = false
@@ -61,7 +50,7 @@ internal const val USE_KOTLIN_GLOBAL_QUEUE = false
 /**
  * If set to true, uses a simple spinlock inside local queues; otherwise, uses a reentrant lock.
  */
-internal const val USE_DOTNET_QUEUE_SPINLOCK = false
+internal const val USE_DOTNET_QUEUE_SPINLOCK = true
 
 /**
  * If set to true, uses a custom .NET semaphore for managing the number of active threads.
@@ -77,7 +66,8 @@ internal class CoroutineScheduler(
     @JvmField val corePoolSize: Int,
     @JvmField val maxPoolSize: Int,
     @JvmField val idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
-    @JvmField val schedulerName: String = DEFAULT_SCHEDULER_NAME
+    @JvmField val schedulerName: String = DEFAULT_SCHEDULER_NAME,
+    @JvmField val queueType: QueueType = QueueType.JavaConcurrentLinkedDeque
 ) : Executor, Closeable {
     init {
         require(corePoolSize >= MIN_SUPPORTED_POOL_SIZE) {
@@ -324,9 +314,7 @@ internal class CoroutineScheduler(
             val worker = workers[i]!!
             if (worker !== currentWorker) {
                 while (worker.isAlive) {
-                    if (ENABLE_MIN_DELAY_UNTIL_STEALING) {
-                        LockSupport.unpark(worker)
-                    }
+                    LockSupport.unpark(worker)
                     worker.join(timeout)
                 }
             }
@@ -349,12 +337,7 @@ internal class CoroutineScheduler(
         if (task.isBlocking) return task
         if (isTerminated) return task
 
-        return if (USE_KOTLIN_LOCAL_QUEUES) {
-            localQueue.add(task, fair = tailDispatch)
-        } else {
-            localQueueDotnet.localPush(task)
-            null
-        }
+        return localQueue.add(task, tailDispatch)
     }
 
 
@@ -493,12 +476,6 @@ internal class CoroutineScheduler(
             val newCounts = counts
                 .setNumProcessingWork(newNumProcessingWork)
                 .setNumExistingThreads(newNumExistingThreads)
-
-            var newCounts2 = counts;
-            newCounts2 = newCounts2.setNumProcessingWork(newNumProcessingWork)
-            newCounts2 = newCounts2.setNumExistingThreads(newNumExistingThreads)
-
-            require(newCounts == newCounts2)
 
             if (threadCounts.compareAndSet(counts, newCounts)) {
                 break
@@ -736,11 +713,17 @@ internal class CoroutineScheduler(
         }
 
         @JvmField
-        val localQueue: WorkQueue = WorkQueue()
-
-        val localQueueDotnet = WorkStealingQueue()
+        val localQueue: LocalQueue = when (queueType) {
+            QueueType.DotnetBased -> LocalQueueDotnet(delayable = false)
+            QueueType.KotlinBased -> LocalQueueKotlin(delayable = false)
+            QueueType.DotnetBasedWithDelays -> LocalQueueDotnet(delayable = true)
+            QueueType.KotlinBasedWithDelays -> LocalQueueKotlin(delayable = true)
+            QueueType.JavaConcurrentLinkedQueue -> LocalConcurrentLinkedQueue()
+            QueueType.JavaConcurrentLinkedDeque -> LocalConcurrentLinkedDeque()
+        }
 
         private val stolenTask: ObjectRef<Task?> = ObjectRef()
+
         private var rngState = Random.nextInt()
         private var minDelayUntilStealableTasksNs = 0L
         private var shouldSpinWait = true
@@ -886,11 +869,7 @@ internal class CoroutineScheduler(
         }
 
         private fun pollLocalQueue(): Task? {
-            return if (USE_KOTLIN_LOCAL_QUEUES) {
-                localQueue.poll()
-            } else {
-                localQueueDotnet.localPop()
-            }
+            return localQueue.poll()
         }
 
         /**
@@ -1008,6 +987,7 @@ internal class CoroutineScheduler(
          * Returns true if this thread did as much work as was available.
          * Returns false if this thread has stopped early.
          */
+
         private fun processBatchOfWork(): Boolean {
             // Before dequeue of the first work item, acknowledge that the thread request has been satisfied.
             markThreadRequestSatisfied()
@@ -1017,7 +997,7 @@ internal class CoroutineScheduler(
             // Loop until there is no work or should exit early.
             while (true) {
                 val workItem = findTask() ?:
-                    if (ENABLE_MIN_DELAY_UNTIL_STEALING && minDelayUntilStealableTasksNs != 0L) {
+                    if (minDelayUntilStealableTasksNs != 0L) {
                         // We didn't take any tasks, but there are some to be stolen in near future.
                         // Instead of returning, we can wait and try again after a small period of time.
                         interrupted()
@@ -1063,7 +1043,7 @@ internal class CoroutineScheduler(
             }
         }
 
-        private fun trySteal(stealingMode: StealingMode = STEAL_ANY): ChannelResult<Task?> {
+        private fun trySteal(): ChannelResult<Task?> {
             val created: Int = createdWorkers.value
 
             if (created < 2) {
@@ -1071,8 +1051,8 @@ internal class CoroutineScheduler(
             }
 
             var currentIndex = nextInt(created)
-            var minDelay = Long.MAX_VALUE
             var missedSteal = false
+            var minDelay = Long.MAX_VALUE
 
             for (i in 1..created) {
                 ++currentIndex
@@ -1080,32 +1060,25 @@ internal class CoroutineScheduler(
                 val worker = workers[currentIndex]
 
                 if (worker !== null && worker !== this) {
-                    if (USE_KOTLIN_LOCAL_QUEUES) {
-                        val stealResult = worker.localQueue.trySteal(stealingMode, stolenTask)
-                        if (stealResult == TASK_STOLEN) {
-                            val result = stolenTask.element
-                            stolenTask.element = null
-                            return ChannelResult.success(result)
-                        } else {
-                            if (worker.localQueue.size > 0) {
-                                missedSteal = true
-                            }
-                            if (stealResult > 0) {
-                                minDelay = min(minDelay, stealResult)
-                            }
-                        }
-                    } else {
-                        val result = worker.localQueueDotnet.trySteal()
-                        if (result.isFailure) {
-                            missedSteal = true
-                        } else {
-                            result.getOrNull()?.let { return ChannelResult.success(it) }
-                        }
+                    val stealResult = worker.localQueue.trySteal(stolenTask)
+
+                    if (stealResult == TASK_STOLEN) {
+                        val result = stolenTask.element
+                        stolenTask.element = null
+                        return ChannelResult.success(result)
                     }
+
+                    if (stealResult == MISSED_STEAL) {
+                        missedSteal = true
+                    } else if (stealResult > 0) {
+                        minDelay = min(minDelay, stealResult)
+                    }
+
                 }
             }
 
             minDelayUntilStealableTasksNs = if (minDelay != Long.MAX_VALUE) minDelay else 0
+
             return if (missedSteal) {
                 ChannelResult.failure()
             } else {
@@ -1222,6 +1195,15 @@ internal class CoroutineScheduler(
         None,
         Immediately,
         WithDelayIfNecessary
+    }
+
+    internal enum class QueueType {
+        DotnetBased,
+        DotnetBasedWithDelays,
+        KotlinBased,
+        KotlinBasedWithDelays,
+        JavaConcurrentLinkedQueue,
+        JavaConcurrentLinkedDeque
     }
 }
 
