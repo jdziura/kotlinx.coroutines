@@ -22,7 +22,7 @@ import java.util.concurrent.*
 @State(Scope.Benchmark)
 open class LaunchBenchmark : ParametrizedDispatcherBase() {
 
-    @Param("scheduler", "fjp")
+    @Param("delayOn", "delayOff")
     override var dispatcher: String = "fjp"
 
     private val jobsToLaunch = 100

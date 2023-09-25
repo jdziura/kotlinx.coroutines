@@ -21,6 +21,12 @@ public actual object Dispatchers {
     public actual val Default: CoroutineDispatcher = DefaultScheduler
 
     @JvmStatic
+    public actual val DelayOff: CoroutineDispatcher = DefaultSchedulerBase(delay = false)
+
+    @JvmStatic
+    public actual val DelayOn: CoroutineDispatcher = DefaultSchedulerBase(delay = true)
+
+    @JvmStatic
     public actual val Main: MainCoroutineDispatcher get() = MainDispatcherLoader.dispatcher
 
     @JvmStatic

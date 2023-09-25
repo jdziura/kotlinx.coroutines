@@ -93,7 +93,8 @@ internal class CoroutineScheduler(
     @JvmField val corePoolSize: Int,
     @JvmField val maxPoolSize: Int,
     @JvmField val idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
-    @JvmField val schedulerName: String = DEFAULT_SCHEDULER_NAME
+    @JvmField val schedulerName: String = DEFAULT_SCHEDULER_NAME,
+    @JvmField val delayable: Boolean = true
 ) : Executor, Closeable {
     init {
         require(corePoolSize >= MIN_SUPPORTED_POOL_SIZE) {
@@ -610,7 +611,7 @@ internal class CoroutineScheduler(
         inline val scheduler get() = this@CoroutineScheduler
 
         @JvmField
-        val localQueue: WorkQueue = WorkQueue()
+        val localQueue: WorkQueue = WorkQueue(delayable)
 
         /**
          * Slot that is used to steal tasks into to avoid re-adding them

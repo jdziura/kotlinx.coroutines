@@ -34,7 +34,7 @@ import java.util.concurrent.*
 open class PingPongActorBenchmark : ParametrizedDispatcherBase() {
     data class Letter(val message: Any?, val sender: SendChannel<Letter>)
 
-    @Param("scheduler", "fjp", "ftp_1")
+    @Param("delayOn", "delayOff")
     override var dispatcher: String = "fjp"
 
     @Benchmark

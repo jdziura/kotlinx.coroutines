@@ -74,4 +74,7 @@ public expect object Dispatchers {
      * the value of [CoroutineStart.UNDISPATCHED].
      */
     public val Unconfined: CoroutineDispatcher
+
+    public val DelayOn: CoroutineDispatcher
+    public val DelayOff: CoroutineDispatcher
 }
