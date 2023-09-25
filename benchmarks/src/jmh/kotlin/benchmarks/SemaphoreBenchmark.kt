@@ -19,16 +19,41 @@ import java.util.concurrent.*
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
 open class SemaphoreBenchmark {
-    @Param
-    private var _1_dispatcher: SemaphoreBenchDispatcherCreator = SemaphoreBenchDispatcherCreator.DEFAULT
+    @Param("DotnetBasedQueues", "DotnetBasedQueuesWithDelays", "KotlinBasedQueues", "KotlinBasedQueuesWithDelays", "JavaBasedQueue", "JavaBasedDeque")
+    private var dispatcherType: String = "DotnetBasedQueues"
+
+    private var _1_dispatcher: SemaphoreBenchDispatcherCreator = when {
+        dispatcherType == "DotnetBasedQueues" -> {
+            SemaphoreBenchDispatcherCreator.DotnetQueues
+        }
+        dispatcherType == "DotnetBasedQueuesWithDelays" -> {
+            SemaphoreBenchDispatcherCreator.DotnetQueuesWithDelays
+        }
+        dispatcherType == "KotlinBasedQueues" -> {
+            SemaphoreBenchDispatcherCreator.KotlinQueues
+        }
+        dispatcherType == "KotlinBasedQueuesWithDelays" -> {
+            SemaphoreBenchDispatcherCreator.KotlinQueuesWithDelays
+        }
+        dispatcherType == "JavaBasedQueue" -> {
+            SemaphoreBenchDispatcherCreator.JavaQueue
+        }
+        dispatcherType == "JavaBasedDeque" -> {
+            SemaphoreBenchDispatcherCreator.JavaDeque
+        }
+
+        else -> error("Unexpected dispatcher: $dispatcherType")
+    }
 
     @Param("0", "1000")
     private var _2_coroutines: Int = 0
 
-    @Param("1", "2", "4", "8", "32", "128", "100000")
+    @Param("1", "2", "4", "10", "20", "80", "100000")
+//    @Param("1", "2", "4", "8", "32", "128", "100000")
     private var _3_maxPermits: Int = 0
 
-    @Param("1", "2", "4", "8", "16") // local machine
+    @Param("1", "2", "4", "10", "20", "40", "80")
+//    @Param("1", "2", "4", "8", "16") // local machine
 //    @Param("1", "2", "4", "8", "16", "32", "64", "128") // Server
     private var _4_parallelism: Int = 0
 
@@ -80,9 +105,12 @@ open class SemaphoreBenchmark {
 }
 
 enum class SemaphoreBenchDispatcherCreator(val create: (parallelism: Int) -> CoroutineDispatcher) {
-    //    FORK_JOIN({ parallelism -> ForkJoinPool(parallelism).asCoroutineDispatcher() }),
-    @Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
-    DEFAULT({ parallelism -> ExperimentalCoroutineDispatcher(corePoolSize = parallelism, maxPoolSize = parallelism) })
+    DotnetQueues({ parallelism -> Dispatchers.DefaultDotnetQueues.limitedParallelism(parallelism) }),
+    DotnetQueuesWithDelays({ parallelism -> Dispatchers.DefaultDotnetQueuesWithDelays.limitedParallelism(parallelism) }),
+    KotlinQueues({ parallelism -> Dispatchers.DefaultKotlinQueues.limitedParallelism(parallelism) }),
+    KotlinQueuesWithDelays({ parallelism -> Dispatchers.DefaultKotlinQueuesWithDelays.limitedParallelism(parallelism) }),
+    JavaQueue({ parallelism -> Dispatchers.DefaultJavaConcurrentLinkedQueue.limitedParallelism(parallelism) }),
+    JavaDeque({ parallelism -> Dispatchers.DefaultJavaConcurrentLinkedDeque.limitedParallelism(parallelism) }),
 }
 
 private const val WORK_INSIDE = 50
