@@ -40,7 +40,7 @@ open class CycledActorsBenchmark : ParametrizedDispatcherBase() {
         val NO_CHANNEL = Channel<Letter>(0)
     }
 
-    @Param("delayOn", "delayOff", "delay_0.1", "delay_0.01", "delay_10", "delay_100")
+    @Param("default", "secondChance")
     override var dispatcher: String = "fjp"
 
     @Param("1", "1024")

@@ -75,8 +75,5 @@ public expect object Dispatchers {
      */
     public val Unconfined: CoroutineDispatcher
 
-    public val DelayOn: CoroutineDispatcher
-    public val DelayOff: CoroutineDispatcher
-
-    public fun delayMultiplied(multiplier: Double): CoroutineDispatcher
+    public val SecondChance: CoroutineDispatcher
 }

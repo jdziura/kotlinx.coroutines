@@ -94,7 +94,7 @@ internal class CoroutineScheduler(
     @JvmField val maxPoolSize: Int,
     @JvmField val idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
     @JvmField val schedulerName: String = DEFAULT_SCHEDULER_NAME,
-    @JvmField val delayMultiplier: Double = 1.0
+    @JvmField val delayBeforeParking: Boolean = false
 ) : Executor, Closeable {
     init {
         require(corePoolSize >= MIN_SUPPORTED_POOL_SIZE) {
@@ -611,7 +611,7 @@ internal class CoroutineScheduler(
         inline val scheduler get() = this@CoroutineScheduler
 
         @JvmField
-        val localQueue: WorkQueue = WorkQueue(delayMultiplier)
+        val localQueue: WorkQueue = WorkQueue(delayable = !delayBeforeParking)
 
         /**
          * Slot that is used to steal tasks into to avoid re-adding them
@@ -689,11 +689,13 @@ internal class CoroutineScheduler(
 
         private fun runWorker() {
             var rescanned = false
+            var shouldPark = false
             while (!isTerminated && state != WorkerState.TERMINATED) {
                 val task = findTask(mayHaveLocalTasks)
                 // Task found. Execute and repeat
                 if (task != null) {
                     rescanned = false
+                    shouldPark = false
                     minDelayUntilStealableTaskNs = 0L
                     executeTask(task)
                     continue
@@ -729,7 +731,13 @@ internal class CoroutineScheduler(
                  * Add itself to the stack of parked workers, re-scans all the queues
                  * to avoid missing wake-up (requestCpuWorker) and either starts executing discovered tasks or parks itself awaiting for new tasks.
                  */
-                tryPark()
+                if (!delayBeforeParking || shouldPark) {
+                    shouldPark = false
+                    tryPark()
+                } else {
+                    shouldPark = true
+                    LockSupport.parkNanos(WORK_STEALING_TIME_RESOLUTION_NS)
+                }
             }
             tryReleaseCpu(WorkerState.TERMINATED)
         }

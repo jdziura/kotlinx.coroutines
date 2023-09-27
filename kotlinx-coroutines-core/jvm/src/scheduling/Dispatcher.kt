@@ -13,11 +13,11 @@ import kotlin.coroutines.*
 internal object DefaultScheduler : DefaultSchedulerBase()
 
 internal open class DefaultSchedulerBase(
-    delayMultiplier: Double = 1.0
+    delayBeforeParking: Boolean = false
 ) : SchedulerCoroutineDispatcher(
     CORE_POOL_SIZE, MAX_POOL_SIZE,
     IDLE_WORKER_KEEP_ALIVE_NS, DEFAULT_SCHEDULER_NAME,
-    delayMultiplier
+    delayBeforeParking
 ) {
 
     @ExperimentalCoroutinesApi
@@ -103,7 +103,7 @@ internal open class SchedulerCoroutineDispatcher(
     private val maxPoolSize: Int = MAX_POOL_SIZE,
     private val idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
     private val schedulerName: String = "CoroutineScheduler",
-    private val delayMultiplier: Double = 1.0
+    private val delayBeforeParking: Boolean = false
 ) : ExecutorCoroutineDispatcher() {
 
     override val executor: Executor
@@ -113,7 +113,7 @@ internal open class SchedulerCoroutineDispatcher(
     private var coroutineScheduler = createScheduler()
 
     private fun createScheduler() =
-        CoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName, delayMultiplier)
+        CoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName, delayBeforeParking)
 
     override fun dispatch(context: CoroutineContext, block: Runnable): Unit = coroutineScheduler.dispatch(block)
 

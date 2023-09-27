@@ -31,14 +31,11 @@ abstract class ParametrizedDispatcherBase : CoroutineScope {
             dispatcher == "scheduler" -> {
                 Dispatchers.Default
             }
-            dispatcher == "delayOn" -> {
-                Dispatchers.DelayOn
+            dispatcher == "default" -> {
+                Dispatchers.Default
             }
-            dispatcher == "delayOff" -> {
-                Dispatchers.DelayOff
-            }
-            dispatcher.startsWith("delay") -> {
-                Dispatchers.delayMultiplied(dispatcher.substring(6).toDouble())
+            dispatcher == "secondChance" -> {
+                Dispatchers.SecondChance
             }
             dispatcher.startsWith("ftp") -> {
                 newFixedThreadPoolContext(dispatcher.substring(4).toInt(), dispatcher).also { closeable = it }

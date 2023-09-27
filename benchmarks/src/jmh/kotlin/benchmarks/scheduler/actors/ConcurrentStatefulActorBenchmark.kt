@@ -61,7 +61,7 @@ open class ConcurrentStatefulActorBenchmark : ParametrizedDispatcherBase() {
     @Param("1024", "8192")
     var stateSize: Int = -1
 
-    @Param("delayOn", "delayOff", "delay_0.1", "delay_0.01", "delay_10", "delay_100")
+    @Param("default", "secondChance")
     override var dispatcher: String = "fjp"
 
     @Benchmark
