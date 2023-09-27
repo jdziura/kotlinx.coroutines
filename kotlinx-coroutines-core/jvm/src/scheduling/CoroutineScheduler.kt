@@ -689,13 +689,11 @@ internal class CoroutineScheduler(
 
         private fun runWorker() {
             var rescanned = false
-            var shouldPark = false
             while (!isTerminated && state != WorkerState.TERMINATED) {
                 val task = findTask(mayHaveLocalTasks)
                 // Task found. Execute and repeat
                 if (task != null) {
                     rescanned = false
-                    shouldPark = false
                     minDelayUntilStealableTaskNs = 0L
                     executeTask(task)
                     continue
@@ -731,13 +729,7 @@ internal class CoroutineScheduler(
                  * Add itself to the stack of parked workers, re-scans all the queues
                  * to avoid missing wake-up (requestCpuWorker) and either starts executing discovered tasks or parks itself awaiting for new tasks.
                  */
-                if (shouldPark) {
-                    shouldPark = false
-                    tryPark()
-                } else {
-                    shouldPark = true
-                    LockSupport.parkNanos(WORK_STEALING_TIME_RESOLUTION_NS)
-                }
+                tryPark()
             }
             tryReleaseCpu(WorkerState.TERMINATED)
         }
