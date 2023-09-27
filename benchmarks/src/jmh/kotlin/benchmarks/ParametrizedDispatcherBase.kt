@@ -37,6 +37,9 @@ abstract class ParametrizedDispatcherBase : CoroutineScope {
             dispatcher == "delayOff" -> {
                 Dispatchers.DelayOff
             }
+            dispatcher.startsWith("delay") -> {
+                Dispatchers.delayMultiplied(dispatcher.substring(6).toDouble())
+            }
             dispatcher.startsWith("ftp") -> {
                 newFixedThreadPoolContext(dispatcher.substring(4).toInt(), dispatcher).also { closeable = it }
             }

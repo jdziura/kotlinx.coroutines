@@ -44,7 +44,7 @@ internal inline val Task.maskForStealingMode: Int
  * I have discovered a truly marvelous proof of this, which this KDoc is too narrow to contain.
  */
 internal class WorkQueue(
-    private val delayable: Boolean = true
+    private val delayMultiplier: Double = 1.0
 ) {
 
     /*
@@ -209,11 +209,11 @@ internal class WorkQueue(
             }
 
             // TODO time wraparound ?
-            if (delayable) {
+            if (delayMultiplier > 0.0) {
                 val time = schedulerTimeSource.nanoTime()
                 val staleness = time - lastScheduled.submissionTime
-                if (staleness < WORK_STEALING_TIME_RESOLUTION_NS) {
-                    return WORK_STEALING_TIME_RESOLUTION_NS - staleness
+                if (staleness < WORK_STEALING_TIME_RESOLUTION_NS * delayMultiplier) {
+                    return (WORK_STEALING_TIME_RESOLUTION_NS * delayMultiplier).toLong() - staleness
                 }
             }
 

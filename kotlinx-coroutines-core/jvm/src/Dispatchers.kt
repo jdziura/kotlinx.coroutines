@@ -21,10 +21,13 @@ public actual object Dispatchers {
     public actual val Default: CoroutineDispatcher = DefaultScheduler
 
     @JvmStatic
-    public actual val DelayOff: CoroutineDispatcher = DefaultSchedulerBase(delay = false)
+    public actual val DelayOff: CoroutineDispatcher = DefaultSchedulerBase(delayMultiplier = 0.0)
 
     @JvmStatic
-    public actual val DelayOn: CoroutineDispatcher = DefaultSchedulerBase(delay = true)
+    public actual val DelayOn: CoroutineDispatcher = DefaultSchedulerBase(delayMultiplier = 1.0)
+
+    @JvmStatic
+    public actual fun delayMultiplied(multiplier: Double): CoroutineDispatcher = DefaultSchedulerBase(delayMultiplier = multiplier)
 
     @JvmStatic
     public actual val Main: MainCoroutineDispatcher get() = MainDispatcherLoader.dispatcher

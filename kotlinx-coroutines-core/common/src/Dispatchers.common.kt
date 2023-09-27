@@ -77,4 +77,6 @@ public expect object Dispatchers {
 
     public val DelayOn: CoroutineDispatcher
     public val DelayOff: CoroutineDispatcher
+
+    public fun delayMultiplied(multiplier: Double): CoroutineDispatcher
 }

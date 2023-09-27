@@ -41,7 +41,7 @@ open class StatefulActorBenchmark : ParametrizedDispatcherBase() {
 
     data class Letter(val message: Any, val sender: SendChannel<Letter>)
 
-    @Param("delayOn", "delayOff")
+    @Param("delayOn", "delayOff", "delay_0.1", "delay_0.01", "delay_10", "delay_100")
     override var dispatcher: String = "fjp"
 
     @Benchmark
