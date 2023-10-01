@@ -53,7 +53,7 @@ open class StatefulAsyncBenchmark : ParametrizedDispatcherBase() {
     @Param("1", "8", "16")
     var jobsCount = 1
 
-    @Param("default", "secondChance")
+    @Param("default", "secondChanceConst", "secondChanceAvgGlobal", "secondChanceAvgGlobalStealable", "secondChanceAvgAll")
     override var dispatcher: String = "fjp"
 
     @Volatile

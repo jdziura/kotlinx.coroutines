@@ -44,7 +44,8 @@ internal inline val Task.maskForStealingMode: Int
  * I have discovered a truly marvelous proof of this, which this KDoc is too narrow to contain.
  */
 internal class WorkQueue(
-    private val delayable: Boolean = true
+    private val delayable: Boolean = true,
+    private val dispatchSampler: DispatchSampler? = null
 ) {
 
     /*
@@ -109,6 +110,9 @@ internal class WorkQueue(
         }
         buffer.lazySet(nextIndex, task)
         producerIndex.incrementAndGet()
+
+        dispatchSampler?.notifyDispatch()
+
         return null
     }
 

@@ -34,8 +34,17 @@ abstract class ParametrizedDispatcherBase : CoroutineScope {
             dispatcher == "default" -> {
                 Dispatchers.Default
             }
-            dispatcher == "secondChance" -> {
-                Dispatchers.SecondChance
+            dispatcher == "secondChanceConst" -> {
+                Dispatchers.SecondChanceConst
+            }
+            dispatcher == "secondChanceAvgGlobal" -> {
+                Dispatchers.SecondChanceAvgGlobal
+            }
+            dispatcher == "secondChanceAvgGlobalStealable" -> {
+                Dispatchers.SecondChanceAvgGlobalStealable
+            }
+            dispatcher == "secondChanceAvgAll" -> {
+                Dispatchers.SecondChanceAvgAll
             }
             dispatcher.startsWith("ftp") -> {
                 newFixedThreadPoolContext(dispatcher.substring(4).toInt(), dispatcher).also { closeable = it }

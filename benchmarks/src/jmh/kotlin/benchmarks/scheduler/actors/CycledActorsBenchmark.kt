@@ -40,7 +40,7 @@ open class CycledActorsBenchmark : ParametrizedDispatcherBase() {
         val NO_CHANNEL = Channel<Letter>(0)
     }
 
-    @Param("default", "secondChance")
+    @Param("default", "secondChanceConst", "secondChanceAvgGlobal", "secondChanceAvgGlobalStealable", "secondChanceAvgAll")
     override var dispatcher: String = "fjp"
 
     @Param("1", "1024")

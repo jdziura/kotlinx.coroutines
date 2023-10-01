@@ -22,7 +22,7 @@ import java.util.concurrent.*
 @State(Scope.Benchmark)
 open class LaunchBenchmark : ParametrizedDispatcherBase() {
 
-    @Param("default", "secondChance")
+    @Param("default", "secondChanceConst", "secondChanceAvgGlobal", "secondChanceAvgGlobalStealable", "secondChanceAvgAll")
     override var dispatcher: String = "fjp"
 
     private val jobsToLaunch = 100

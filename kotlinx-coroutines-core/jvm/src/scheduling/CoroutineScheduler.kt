@@ -94,7 +94,7 @@ internal class CoroutineScheduler(
     @JvmField val maxPoolSize: Int,
     @JvmField val idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
     @JvmField val schedulerName: String = DEFAULT_SCHEDULER_NAME,
-    @JvmField val delayBeforeParking: Boolean = false
+    @JvmField val parkingPolicy: ParkingPolicy = ParkingPolicy.DEFAULT
 ) : Executor, Closeable {
     init {
         require(corePoolSize >= MIN_SUPPORTED_POOL_SIZE) {
@@ -401,11 +401,20 @@ internal class CoroutineScheduler(
         val currentWorker = currentWorker()
         val notAdded = currentWorker.submitToLocalQueue(task, tailDispatch)
         if (notAdded != null) {
+            if (parkingPolicy == ParkingPolicy.SECOND_CHANCE_AVG_GLOBAL ||
+                parkingPolicy == ParkingPolicy.SECOND_CHANCE_AVG_GLOBAL_STEALABLE) {
+                dispatchSampler.notifyDispatch()
+            }
             if (!addToGlobalQueue(notAdded)) {
                 // Global queue is closed in the last step of close/shutdown -- no more tasks should be accepted
                 throw RejectedExecutionException("$schedulerName was terminated")
             }
         }
+
+        if (parkingPolicy == ParkingPolicy.SECOND_CHANCE_AVG_ALL) {
+            dispatchSampler.notifyDispatch()
+        }
+
         val skipUnpark = tailDispatch && currentWorker != null
         // Checking 'task' instead of 'notAdded' is completely okay
         if (isBlockingTask) {
@@ -591,6 +600,8 @@ internal class CoroutineScheduler(
         }
     }
 
+    private val dispatchSampler = DispatchSampler()
+
     internal inner class Worker private constructor() : Thread() {
         init {
             isDaemon = true
@@ -611,7 +622,8 @@ internal class CoroutineScheduler(
         inline val scheduler get() = this@CoroutineScheduler
 
         @JvmField
-        val localQueue: WorkQueue = WorkQueue(delayable = !delayBeforeParking)
+        val localQueue: WorkQueue = WorkQueue(delayable = (parkingPolicy == ParkingPolicy.DEFAULT),
+                                                dispatchSampler = if (parkingPolicy == ParkingPolicy.SECOND_CHANCE_AVG_GLOBAL_STEALABLE) dispatchSampler else null)
 
         /**
          * Slot that is used to steal tasks into to avoid re-adding them
@@ -731,12 +743,21 @@ internal class CoroutineScheduler(
                  * Add itself to the stack of parked workers, re-scans all the queues
                  * to avoid missing wake-up (requestCpuWorker) and either starts executing discovered tasks or parks itself awaiting for new tasks.
                  */
-                if (!delayBeforeParking || shouldPark) {
-                    shouldPark = false
+
+                if (parkingPolicy == ParkingPolicy.DEFAULT || shouldPark) {
                     tryPark()
                 } else {
                     shouldPark = true
-                    LockSupport.parkNanos(WORK_STEALING_TIME_RESOLUTION_NS)
+
+                    val delay = if (parkingPolicy == ParkingPolicy.SECOND_CHANCE_CONST) {
+                        WORK_STEALING_TIME_RESOLUTION_NS
+                    } else {
+                        dispatchSampler.averageDispatchTime / 2
+                    }
+
+//                    System.err.println("$delay, $WORK_STEALING_TIME_RESOLUTION_NS, ${delay.toDouble() * 100.0 / WORK_STEALING_TIME_RESOLUTION_NS}")
+
+                    LockSupport.parkNanos(delay)
                 }
             }
             tryReleaseCpu(WorkerState.TERMINATED)
@@ -1022,6 +1043,22 @@ internal class CoroutineScheduler(
          * Terminal state, will no longer be used
          */
         TERMINATED
+    }
+
+    enum class ParkingPolicy {
+        DEFAULT,
+
+        // Thread is parking for a small fixed time before second chance.
+        SECOND_CHANCE_CONST,
+
+        // Time to park is calculated based on average enqueue times to global queue
+        SECOND_CHANCE_AVG_GLOBAL,
+
+        // Time to park is calculated based on average enqueue times to global queue and local tasks outside LIFO buffer
+        SECOND_CHANCE_AVG_GLOBAL_STEALABLE,
+
+        // Time to park is calculated based on all average enqueues times
+        SECOND_CHANCE_AVG_ALL,
     }
 }
 

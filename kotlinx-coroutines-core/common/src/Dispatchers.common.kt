@@ -75,5 +75,11 @@ public expect object Dispatchers {
      */
     public val Unconfined: CoroutineDispatcher
 
-    public val SecondChance: CoroutineDispatcher
+    public val SecondChanceConst: CoroutineDispatcher
+
+    public val SecondChanceAvgGlobal: CoroutineDispatcher
+
+    public val SecondChanceAvgGlobalStealable: CoroutineDispatcher
+
+    public val SecondChanceAvgAll: CoroutineDispatcher
 }

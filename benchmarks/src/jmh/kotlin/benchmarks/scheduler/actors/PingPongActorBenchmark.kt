@@ -34,7 +34,7 @@ import java.util.concurrent.*
 open class PingPongActorBenchmark : ParametrizedDispatcherBase() {
     data class Letter(val message: Any?, val sender: SendChannel<Letter>)
 
-    @Param("default", "secondChance")
+    @Param("default", "secondChanceConst", "secondChanceAvgGlobal", "secondChanceAvgGlobalStealable", "secondChanceAvgAll")
     override var dispatcher: String = "fjp"
 
     @Benchmark

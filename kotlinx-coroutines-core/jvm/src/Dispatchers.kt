@@ -21,7 +21,16 @@ public actual object Dispatchers {
     public actual val Default: CoroutineDispatcher = DefaultScheduler
 
     @JvmStatic
-    public actual val SecondChance: CoroutineDispatcher = DefaultSchedulerBase(delayBeforeParking = true)
+    public actual val SecondChanceConst: CoroutineDispatcher = DefaultSchedulerBase(parkingPolicy = CoroutineScheduler.ParkingPolicy.SECOND_CHANCE_CONST)
+
+    @JvmStatic
+    public actual val SecondChanceAvgGlobal: CoroutineDispatcher = DefaultSchedulerBase(parkingPolicy = CoroutineScheduler.ParkingPolicy.SECOND_CHANCE_AVG_GLOBAL)
+
+    @JvmStatic
+    public actual val SecondChanceAvgGlobalStealable: CoroutineDispatcher = DefaultSchedulerBase(parkingPolicy = CoroutineScheduler.ParkingPolicy.SECOND_CHANCE_AVG_GLOBAL_STEALABLE)
+
+    @JvmStatic
+    public actual val SecondChanceAvgAll: CoroutineDispatcher = DefaultSchedulerBase(parkingPolicy = CoroutineScheduler.ParkingPolicy.SECOND_CHANCE_AVG_ALL)
 
     @JvmStatic
     public actual val Main: MainCoroutineDispatcher get() = MainDispatcherLoader.dispatcher
