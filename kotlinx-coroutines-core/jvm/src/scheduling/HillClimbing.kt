@@ -8,7 +8,8 @@ import kotlin.random.Random
 import kotlin.math.*
 
 internal class HillClimbing(
-    private val scheduler: DotnetBasedCoroutineScheduler
+    private val scheduler: DotnetBasedCoroutineScheduler,
+    private val config: Config = DefaultConfig()
 ) {
     private class Complex(val re: Double, val im: Double) {
         operator fun plus(other: Complex): Complex {
@@ -55,39 +56,11 @@ internal class HillClimbing(
         ThreadTimedOut,
         CooperativeBlocking
     }
+    
 
-    companion object {
-        private const val DEFAULT_WAVE_PERIOD = 4
-        private const val DEFAULT_MAX_THREAD_WAVE_MAGNITUDE = 20
-        private const val DEFAULT_THREAD_MAGNITUDE_MULTIPLIER = 100.0 / 100.0
-        private const val DEFAULT_TARGET_THROUGHPUT_RATIO = 15.0 / 100.0
-        private const val DEFAULT_TARGET_SIGNAL_TO_NOISE_RATIO = 300.0 / 100.0
-        private const val DEFAULT_MAX_CHANGE_PER_SECOND = 4
-        private const val DEFAULT_MAX_CHANGE_PER_SAMPLE = 20
-        private const val DEFAULT_SAMPLE_INTERVAL_MS_LOW = 10
-        private const val DEFAULT_SAMPLE_INTERVAL_MS_HIGH = 200
-        private const val DEFAULT_THROUGHPUT_ERROR_SMOOTHING_FACTOR = 1.0 / 100.0
-        private const val DEFAULT_GAIN_EXPONENT = 200.0 / 100.0
-        private const val DEFAULT_MAX_SAMPLE_ERROR = 15.0 / 100.0
-
-        private const val WAVE_PERIOD = DEFAULT_WAVE_PERIOD
-        private const val MAX_THREAD_WAVE_MAGNITUDE = DEFAULT_MAX_THREAD_WAVE_MAGNITUDE
-        private const val THREAD_MAGNITUDE_MULTIPLIER = DEFAULT_THREAD_MAGNITUDE_MULTIPLIER
-        private const val SAMPLES_TO_MEASURE = WAVE_PERIOD * 8
-        private const val TARGET_THROUGHPUT_RATIO = DEFAULT_TARGET_THROUGHPUT_RATIO
-        private const val TARGET_SIGNAL_TO_NOISE_RATIO = DEFAULT_TARGET_SIGNAL_TO_NOISE_RATIO
-        private const val MAX_CHANGE_PER_SECOND = 10
-        private const val MAX_CHANGE_PER_SAMPLE = DEFAULT_MAX_CHANGE_PER_SAMPLE
-        private const val SAMPLE_INTERVAL_MS_LOW = DEFAULT_SAMPLE_INTERVAL_MS_LOW
-        private const val SAMPLE_INTERVAL_MS_HIGH = DEFAULT_SAMPLE_INTERVAL_MS_HIGH
-        private const val THROUGHPUT_ERROR_SMOOTHING_FACTOR = DEFAULT_THROUGHPUT_ERROR_SMOOTHING_FACTOR
-        private const val GAIN_EXPONENT = DEFAULT_GAIN_EXPONENT / 2.0
-        private const val MAX_SAMPLE_ERROR = DEFAULT_MAX_SAMPLE_ERROR
-    }
-
-    private val samples = DoubleArray(SAMPLES_TO_MEASURE)
-    private val threadCounts = DoubleArray(SAMPLES_TO_MEASURE)
-    private var currentSampleMs = Random.nextInt(SAMPLE_INTERVAL_MS_LOW, SAMPLE_INTERVAL_MS_HIGH + 1)
+    private val samples = DoubleArray(config.samplesToMeasure)
+    private val threadCounts = DoubleArray(config.samplesToMeasure)
+    private var currentSampleMs = Random.nextInt(config.sampleIntervalMsLow, config.sampleIntervalMsHigh + 1)
     private var lastThreadCount = 0
     private var accumulatedSampleDurationSeconds = 0.0
     private var accumulatedCompletionCount = 0
@@ -130,7 +103,7 @@ internal class HillClimbing(
         // we missed in the previous samples, and so will be 33% positive.  So every three samples we'll have
         // two "low" samples and one "high" sample. This will appear as periodic variation right in the frequency
         // range we're targeting, which will not be filtered by the frequency-domain translation.
-        if (totalSamples > 0 && ((currentThreadCount - 1.0) / numCompletions) >= MAX_SAMPLE_ERROR) {
+        if (totalSamples > 0 && ((currentThreadCount - 1.0) / numCompletions) >= config.maxSampleError) {
             // not accurate enough yet. Let's accumulate the data so far, and tell the scheduler
             // to collect a little more.
             accumulatedSampleDurationSeconds = sampleDurationSeconds
@@ -144,7 +117,7 @@ internal class HillClimbing(
 
         // Add the current thread count and throughput sample to our history.
         val throughput = numCompletions / sampleDurationSeconds
-        val sampleIndex = (totalSamples % SAMPLES_TO_MEASURE).toInt()
+        val sampleIndex = (totalSamples % config.samplesToMeasure).toInt()
         samples[sampleIndex] = throughput
         threadCounts[sampleIndex] = currentThreadCount.toDouble()
         totalSamples++
@@ -156,16 +129,16 @@ internal class HillClimbing(
         // How many samples will we use? It must be at least the three wave periods we're looking for, and it must also be a whole
         // multiple of the primary wave's period; otherwise the frequency we're looking for will fall between two frequency bands
         // in the Fourier analysis, and we won't be able to measure it accurately.
-        val sampleCount = min(totalSamples - 1, SAMPLES_TO_MEASURE.toLong()).toInt() / WAVE_PERIOD * WAVE_PERIOD
+        val sampleCount = min(totalSamples - 1, config.samplesToMeasure.toLong()).toInt() / config.wavePeriod * config.wavePeriod
 
-        if (sampleCount > WAVE_PERIOD) {
+        if (sampleCount > config.wavePeriod) {
             // Average the throughput and thread count samples, so we can scale the wave magnitudes later.
             var sampleSum = 0.0
             var threadSum = 0.0
 
             for (i in 0 until sampleCount) {
-                sampleSum += samples[((totalSamples - sampleCount + i) % SAMPLES_TO_MEASURE).toInt()]
-                threadSum += threadCounts[((totalSamples - sampleCount + i) % SAMPLES_TO_MEASURE).toInt()]
+                sampleSum += samples[((totalSamples - sampleCount + i) % config.samplesToMeasure).toInt()]
+                threadSum += threadCounts[((totalSamples - sampleCount + i) % config.samplesToMeasure).toInt()]
             }
 
             val averageThroughput = sampleSum / sampleCount
@@ -174,13 +147,13 @@ internal class HillClimbing(
             if (averageThroughput > 0 && averageThreadCount > 0) {
                 // Calculate the periods of the adjacent frequency bands we'll be using to measure noise levels.
                 // We want the two adjacent Fourier frequency bands.
-                val adjacentPeriod1 = sampleCount / ((sampleCount.toDouble() / WAVE_PERIOD) + 1)
-                val adjacentPeriod2 = sampleCount / ((sampleCount.toDouble() / WAVE_PERIOD) - 1)
+                val adjacentPeriod1 = sampleCount / ((sampleCount.toDouble() / config.wavePeriod) + 1)
+                val adjacentPeriod2 = sampleCount / ((sampleCount.toDouble() / config.wavePeriod) - 1)
 
                 // Get the three different frequency components of the throughput (scaled by average
                 // throughput). Our "error" estimate (the amount of noise that might be present in the
                 // frequency band we're really interested in) is the average of the adjacent bands.
-                val throughputWaveComponent = getWaveComponent(samples, sampleCount, WAVE_PERIOD.toDouble()) / averageThroughput
+                val throughputWaveComponent = getWaveComponent(samples, sampleCount, config.wavePeriod.toDouble()) / averageThroughput
                 var throughputErrorEstimate = (getWaveComponent(samples, sampleCount, adjacentPeriod1) / averageThroughput).abs()
 
                 if (adjacentPeriod2 <= sampleCount) {
@@ -189,19 +162,19 @@ internal class HillClimbing(
 
                 // Do the same for the thread counts, so we have something to compare to. We don't measure thread count
                 // noise, because there is none. These are exact measurements.
-                val threadWaveComponent = getWaveComponent(threadCounts, sampleCount, WAVE_PERIOD.toDouble()) / averageThreadCount
+                val threadWaveComponent = getWaveComponent(threadCounts, sampleCount, config.wavePeriod.toDouble()) / averageThreadCount
 
                 // Update our moving average of the throughput noise. We'll use this later as feedback to
                 // determine the new size of the thread wave.
                 averageThroughputNoise = if (averageThroughputNoise == 0.0) {
                     throughputErrorEstimate
                 } else {
-                    (THROUGHPUT_ERROR_SMOOTHING_FACTOR * throughputErrorEstimate) + ((1.0 - THROUGHPUT_ERROR_SMOOTHING_FACTOR) * averageThroughputNoise)
+                    (config.throughputErrorSmoothingFactor * throughputErrorEstimate) + ((1.0 - config.throughputErrorSmoothingFactor) * averageThroughputNoise)
                 }
 
                 if (threadWaveComponent.abs() > 0.0) {
                     // Adjust the throughput wave, so it's centered around the target wave, and then calculate the adjusted throughput/thread ratio.
-                    ratio = (throughputWaveComponent - (threadWaveComponent * TARGET_THROUGHPUT_RATIO)) / threadWaveComponent
+                    ratio = (throughputWaveComponent - (threadWaveComponent * config.targetThroughputRatio)) / threadWaveComponent
                     state = StateOrTransition.ClimbingMove
                 } else {
                     ratio = Complex(0.0, 0.0)
@@ -213,7 +186,7 @@ internal class HillClimbing(
                 val noiseForConfidence = max(averageThroughputNoise, throughputErrorEstimate)
 
                 confidence = if (noiseForConfidence > 0.0) {
-                    (threadWaveComponent.abs() / noiseForConfidence) / TARGET_SIGNAL_TO_NOISE_RATIO
+                    (threadWaveComponent.abs() / noiseForConfidence) / config.targetSignalToNoiseRatio
                 } else {
                     1.0 // There is no noise!
                 }
@@ -234,9 +207,9 @@ internal class HillClimbing(
         // Now apply non-linear gain, such that values around zero are attenuated, while higher values
         // are enhanced. This allows us to move quickly if we're far away from the target, but more slowly
         // if we're getting close, giving us rapid ramp-up without wild oscillations around the target.
-        val gain = MAX_CHANGE_PER_SECOND * sampleDurationSeconds
-        move = abs(move).pow(GAIN_EXPONENT) * (if (move >= 0.0) 1.0 else -1.0) * gain
-        move = min(move, MAX_CHANGE_PER_SAMPLE.toDouble())
+        val gain = config.maxChangePerSecond * sampleDurationSeconds
+        move = abs(move).pow(config.gainExponent) * (if (move >= 0.0) 1.0 else -1.0) * gain
+        move = min(move, config.maxChangePerSample.toDouble())
 
         // [TODO] If move > 0 and there is high cpu utilization, hillClimber shouldn't make a move.
 
@@ -245,8 +218,8 @@ internal class HillClimbing(
 
         // Calculate the new thread wave magnitude, which is based on the moving average we've been keeping of
         // the throughput error. This average starts at zero, so we'll start with a nice safe little wave at first.
-        var newThreadWaveMagnitude = (0.5 + (currentControlSetting * averageThroughputNoise * TARGET_SIGNAL_TO_NOISE_RATIO * THREAD_MAGNITUDE_MULTIPLIER * 2.0)).toInt()
-        newThreadWaveMagnitude = min(newThreadWaveMagnitude, MAX_THREAD_WAVE_MAGNITUDE)
+        var newThreadWaveMagnitude = (0.5 + (currentControlSetting * averageThroughputNoise * config.targetSignalToNoiseRatio * config.threadMagnitudeMultiplier * 2.0)).toInt()
+        newThreadWaveMagnitude = min(newThreadWaveMagnitude, config.maxThreadWaveMagnitude)
         newThreadWaveMagnitude = max(newThreadWaveMagnitude, 1)
 
         // Make sure our control setting is within the scheduler's limits. When some threads are blocked due to
@@ -259,7 +232,7 @@ internal class HillClimbing(
         currentControlSetting = max(currentControlSetting, minThreads.toDouble())
 
         // Calculate the new thread count (control setting + square wave).
-        var newThreadCount = (currentControlSetting + newThreadWaveMagnitude * ((totalSamples / (WAVE_PERIOD / 2)) % 2)).toInt()
+        var newThreadCount = (currentControlSetting + newThreadWaveMagnitude * ((totalSamples / (config.wavePeriod / 2)) % 2)).toInt()
 
         // Make sure the new thread count doesn't exceed the scheduler's limits.
         newThreadCount = min(maxThreads, newThreadCount)
@@ -297,7 +270,7 @@ internal class HillClimbing(
     private fun changeThreadCount(newThreadCount: Int, state: StateOrTransition) {
         lastThreadCount = newThreadCount
         if (state != StateOrTransition.CooperativeBlocking) {
-            currentSampleMs = Random.nextInt(SAMPLE_INTERVAL_MS_LOW, SAMPLE_INTERVAL_MS_HIGH + 1)
+            currentSampleMs = Random.nextInt(config.sampleIntervalMsLow, config.sampleIntervalMsHigh + 1)
 
             if (LOG_MAJOR_HC_ADJUSTMENTS) {
                 val throughput =
@@ -323,11 +296,48 @@ internal class HillClimbing(
         var q2 = 0.0
 
         for (i in 0 until numSamples) {
-            q0 = coeff * q1 - q2 + samples[((totalSamples - numSamples + i) % SAMPLES_TO_MEASURE).toInt()]
+            q0 = coeff * q1 - q2 + samples[((totalSamples - numSamples + i) % config.samplesToMeasure).toInt()]
             q2 = q1
             q1 = q0
         }
 
         return Complex(q1 - q2 * cosine, q2 * sine) / numSamples.toDouble()
+    }
+
+    abstract class Config {
+        abstract val wavePeriod: Int
+        abstract val maxThreadWaveMagnitude: Int
+        abstract val threadMagnitudeMultiplier: Double
+        abstract val samplesToMeasure: Int
+        abstract val targetThroughputRatio: Double
+        abstract val targetSignalToNoiseRatio: Double
+        abstract val maxChangePerSecond: Int
+        abstract val maxChangePerSample: Int
+        abstract val sampleIntervalMsLow: Int
+        abstract val sampleIntervalMsHigh: Int
+        abstract val throughputErrorSmoothingFactor: Double
+        abstract val gainExponent: Double
+        abstract val maxSampleError: Double
+    }
+
+    open class DefaultConfig : Config() {
+        override val wavePeriod = 4
+        override val maxThreadWaveMagnitude = 20
+        override val threadMagnitudeMultiplier = 100.0 / 100.0
+        override val samplesToMeasure = 32 // must be divisible by wavePeriod
+        override val targetThroughputRatio = 15.0 / 100.0
+        override val targetSignalToNoiseRatio = 300.0 / 100.0
+        override val maxChangePerSecond = 4
+        override val maxChangePerSample = 20
+        override val sampleIntervalMsLow = 10
+        override val sampleIntervalMsHigh = 200
+        override val throughputErrorSmoothingFactor = 1.0 / 100.0
+        override val gainExponent = 200.0 / 100.0
+        override val maxSampleError = 15.0 / 100.0
+    }
+
+    open class LinearGain(pMaxChangePerSecond: Int = 4) : DefaultConfig() {
+        override val gainExponent = 100.0 / 100.0
+        override val maxChangePerSecond = pMaxChangePerSecond
     }
 }

@@ -17,12 +17,6 @@ import kotlin.math.*
 import kotlin.random.Random
 
 /**
- * If enabled, the scheduler dynamically adjusts the number of active worker threads based on
- * current throughput, trying to maximize it with a minimum number of workers.
- */
-internal const val ENABLE_HILL_CLIMBING = true
-
-/**
  * If enabled, Gate Thread occasionally injects a thread if no work has been done for this time period.
  */
 internal const val ENABLE_STARVATION_DETECTION = false
@@ -55,12 +49,12 @@ internal const val USE_KOTLIN_LOCAL_QUEUES = false
 /**
  * If set to false, the code will use the JAVA ConcurrentLinkedQueue.
  */
-internal const val USE_KOTLIN_GLOBAL_QUEUE = false
+internal const val USE_KOTLIN_GLOBAL_QUEUE = true
 
 /**
  * If set to true, uses a simple spinlock inside local queues; otherwise, uses a reentrant lock.
  */
-internal const val USE_DOTNET_QUEUE_SPINLOCK = false
+internal const val USE_DOTNET_QUEUE_SPINLOCK = true
 
 /**
  * If set to true, uses a custom .NET semaphore for managing the number of active threads.
@@ -76,7 +70,9 @@ internal class DotnetBasedCoroutineScheduler(
     @JvmField val corePoolSize: Int,
     @JvmField val maxPoolSize: Int,
     @JvmField val idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
-    @JvmField val schedulerName: String = DEFAULT_SCHEDULER_NAME
+    @JvmField val schedulerName: String = DEFAULT_SCHEDULER_NAME,
+    val enableHillClimbing: Boolean = true,
+    hillClimbingConfig: HillClimbing.Config = HillClimbing.LinearGain(20)
 ) : Scheduler {
     init {
         require(corePoolSize >= MIN_SUPPORTED_POOL_SIZE) {
@@ -188,7 +184,7 @@ internal class DotnetBasedCoroutineScheduler(
     private val semaphore = Semaphore(0)
     private val semaphoreDotnet = LowLevelLifoSemaphore(0, SEMAPHORE_SPIN_COUNT)
 
-    private val hillClimber = HillClimbing(this)
+    private val hillClimber = HillClimbing(this, hillClimbingConfig)
 
     @Volatile private var lastDequeueTime = 0L
     @Volatile private var nextCompletedWorkRequestsTime = 0L
@@ -855,7 +851,7 @@ internal class DotnetBasedCoroutineScheduler(
          * the number of worker threads.
          */
         private fun shouldAdjustMaxWorkersActive(currentTimeMs: Long): Boolean {
-            if (!ENABLE_HILL_CLIMBING) {
+            if (!enableHillClimbing) {
                 return false
             }
 
