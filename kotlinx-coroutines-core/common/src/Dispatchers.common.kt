@@ -5,6 +5,7 @@
 package kotlinx.coroutines
 
 import kotlin.coroutines.*
+import kotlin.jvm.*
 
 /**
  * Groups various implementations of [CoroutineDispatcher].
@@ -74,4 +75,12 @@ public expect object Dispatchers {
      * the value of [CoroutineStart.UNDISPATCHED].
      */
     public val Unconfined: CoroutineDispatcher
+
+    public val GoBased: CoroutineDispatcher
+    public val DotnetBased: CoroutineDispatcher
+    public val DotnetBasedNoHC: CoroutineDispatcher
+    public val DotnetBasedLinearGain: CoroutineDispatcher
+    public val DotnetBasedLinearGainFast: CoroutineDispatcher
+    public val KotlinBasedWithPredictionPolicy: CoroutineDispatcher
+
 }

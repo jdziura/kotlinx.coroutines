@@ -93,7 +93,8 @@ internal class CoroutineScheduler(
     @JvmField val corePoolSize: Int,
     @JvmField val maxPoolSize: Int,
     @JvmField val idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
-    @JvmField val schedulerName: String = DEFAULT_SCHEDULER_NAME
+    @JvmField val schedulerName: String = DEFAULT_SCHEDULER_NAME,
+    val usePredictionPolicy: Boolean = false
 ) : Scheduler {
     init {
         require(corePoolSize >= MIN_SUPPORTED_POOL_SIZE) {
@@ -114,6 +115,8 @@ internal class CoroutineScheduler(
     val globalCpuQueue = GlobalQueue()
     @JvmField
     val globalBlockingQueue = GlobalQueue()
+
+    private val dispatchSampler = DispatchSampler()
 
     private fun addToGlobalQueue(task: Task): Boolean {
         return if (task.isBlocking) {
@@ -404,6 +407,9 @@ internal class CoroutineScheduler(
                 // Global queue is closed in the last step of close/shutdown -- no more tasks should be accepted
                 throw RejectedExecutionException("$schedulerName was terminated")
             }
+            if (usePredictionPolicy) {
+                dispatchSampler.notifyDispatch()
+            }
         }
         val skipUnpark = tailDispatch && currentWorker != null
         // Checking 'task' instead of 'notAdded' is completely okay
@@ -610,7 +616,7 @@ internal class CoroutineScheduler(
         inline val scheduler get() = this@CoroutineScheduler
 
         @JvmField
-        val localQueue: WorkQueue = WorkQueue()
+        val localQueue: WorkQueue = WorkQueue(delayable = !usePredictionPolicy, dispatchSampler = if (usePredictionPolicy) dispatchSampler else null)
 
         /**
          * Slot that is used to steal tasks into to avoid re-adding them
@@ -688,11 +694,13 @@ internal class CoroutineScheduler(
 
         private fun runWorker() {
             var rescanned = false
+            var shouldPark = false
             while (!isTerminated && state != WorkerState.TERMINATED) {
                 val task = findTask(mayHaveLocalTasks)
                 // Task found. Execute and repeat
                 if (task != null) {
                     rescanned = false
+                    shouldPark = false
                     minDelayUntilStealableTaskNs = 0L
                     executeTask(task)
                     continue
@@ -728,7 +736,13 @@ internal class CoroutineScheduler(
                  * Add itself to the stack of parked workers, re-scans all the queues
                  * to avoid missing wake-up (requestCpuWorker) and either starts executing discovered tasks or parks itself awaiting for new tasks.
                  */
-                tryPark()
+
+                if (!usePredictionPolicy || shouldPark) {
+                    tryPark()
+                } else {
+                    shouldPark = true
+                    LockSupport.parkNanos(dispatchSampler.averageDispatchTime / 2)
+                }
             }
             tryReleaseCpu(WorkerState.TERMINATED)
         }

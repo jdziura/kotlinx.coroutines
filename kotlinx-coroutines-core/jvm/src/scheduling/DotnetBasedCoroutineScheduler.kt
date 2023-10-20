@@ -71,8 +71,9 @@ internal class DotnetBasedCoroutineScheduler(
     @JvmField val maxPoolSize: Int,
     @JvmField val idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
     @JvmField val schedulerName: String = DEFAULT_SCHEDULER_NAME,
-    val enableHillClimbing: Boolean = true,
-    hillClimbingConfig: HillClimbing.Config = HillClimbing.LinearGain(20)
+    @JvmField val enableHillClimbing: Boolean = true,
+    @JvmField val hillClimbingGainExponent: Double = 200.0 / 100.0,
+    @JvmField val hillClimbingMaxChangePerSecond: Int = 4
 ) : Scheduler {
     init {
         require(corePoolSize >= MIN_SUPPORTED_POOL_SIZE) {
@@ -184,7 +185,7 @@ internal class DotnetBasedCoroutineScheduler(
     private val semaphore = Semaphore(0)
     private val semaphoreDotnet = LowLevelLifoSemaphore(0, SEMAPHORE_SPIN_COUNT)
 
-    private val hillClimber = HillClimbing(this, hillClimbingConfig)
+    private val hillClimber = HillClimbing(this, hillClimbingGainExponent, hillClimbingMaxChangePerSecond)
 
     @Volatile private var lastDequeueTime = 0L
     @Volatile private var nextCompletedWorkRequestsTime = 0L
@@ -637,16 +638,6 @@ internal class DotnetBasedCoroutineScheduler(
     private fun wakeGateThread() {
         delayEvent.set()
         ensureGateThreadRunning()
-    }
-
-    private fun sufficientDelaySinceLastDequeue(): Boolean {
-        val delay = System.currentTimeMillis() - lastDequeueTime
-
-        // [TODO] Handle CPU usage (it happens in .NET)
-
-        val minimumDelay = GATE_ACTIVITIES_PERIOD_MS
-
-        return delay > minimumDelay
     }
 
     /**

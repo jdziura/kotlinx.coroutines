@@ -28,14 +28,26 @@ abstract class ParametrizedDispatcherBase : CoroutineScope {
     open fun setup() {
         coroutineContext = when {
             dispatcher == "fjp" -> ForkJoinPool.commonPool().asCoroutineDispatcher()
-            dispatcher == "scheduler" -> {
+            dispatcher == "kotlin_default" -> {
                 Dispatchers.Default
             }
-            dispatcher == "go_scheduler" -> {
+            dispatcher == "kotlin_prediction" -> {
+                Dispatchers.KotlinBasedWithPredictionPolicy
+            }
+            dispatcher == "go" -> {
                 Dispatchers.GoBased
             }
-            dispatcher == "dotnet_scheduler" -> {
+            dispatcher == "dotnet_default" -> {
                 Dispatchers.DotnetBased
+            }
+            dispatcher == "dotnet_no_hc" -> {
+                Dispatchers.DotnetBasedNoHC
+            }
+            dispatcher == "dotnet_linear_gain" -> {
+                Dispatchers.DotnetBasedLinearGain
+            }
+            dispatcher == "dotnet_linear_gain_fast" -> {
+                Dispatchers.DotnetBasedLinearGainFast
             }
             dispatcher.startsWith("ftp") -> {
                 newFixedThreadPoolContext(dispatcher.substring(4).toInt(), dispatcher).also { closeable = it }

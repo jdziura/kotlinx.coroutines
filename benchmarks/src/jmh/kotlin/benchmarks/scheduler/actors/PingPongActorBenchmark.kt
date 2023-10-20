@@ -34,7 +34,8 @@ import java.util.concurrent.*
 open class PingPongActorBenchmark : ParametrizedDispatcherBase() {
     data class Letter(val message: Any?, val sender: SendChannel<Letter>)
 
-    @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp", "ftp_1")
+    // Go-based hangs
+    @Param("kotlin_default", "kotlin_prediction", "dotnet_default", "dotnet_no_hc", "dotnet_linear_gain", "dotnet_linear_gain_fast", "fjp")
     override var dispatcher: String = "fjp"
 
     @Benchmark

@@ -141,23 +141,50 @@ internal open class SchedulerCoroutineDispatcher(
     internal fun restore() = usePrivateScheduler() // recreate scheduler
 }
 
-internal object GoBasedScheduler : GoBasedCoroutineDispatcher() {}
-internal object DotnetBasedScheduler : DotnetBasedCoroutineDispatcher() {}
-
-internal open class GoBasedCoroutineDispatcher(
-    corePoolSize: Int = CORE_POOL_SIZE,
-    maxPoolSize: Int = MAX_POOL_SIZE,
-    idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
-    schedulerName: String = "GoBasedCoroutineScheduler"
-) : SchedulerCoroutineDispatcher(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName) {
-    override fun createScheduler() = GoBasedCoroutineScheduler(corePoolSize, maxPoolSize, schedulerName)
+internal object GoBasedScheduler : SchedulerCoroutineDispatcher(
+    CORE_POOL_SIZE, MAX_POOL_SIZE,
+    IDLE_WORKER_KEEP_ALIVE_NS, "GoBasedCoroutineScheduler"
+) {
+    override fun createScheduler() =
+        GoBasedCoroutineScheduler(corePoolSize, maxPoolSize, schedulerName)
 }
 
-internal open class DotnetBasedCoroutineDispatcher(
-    corePoolSize: Int = CORE_POOL_SIZE,
-    maxPoolSize: Int = MAX_POOL_SIZE,
-    idleWorkerKeepAliveNs: Long = IDLE_WORKER_KEEP_ALIVE_NS,
-    schedulerName: String = "DotnetBasedCoroutineScheduler"
-) : SchedulerCoroutineDispatcher(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName) {
-    override fun createScheduler() = DotnetBasedCoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName)
+internal object DotnetBasedScheduler : SchedulerCoroutineDispatcher(
+    CORE_POOL_SIZE, MAX_POOL_SIZE,
+    IDLE_WORKER_KEEP_ALIVE_NS, "DotnetBasedCoroutineScheduler"
+) {
+    override fun createScheduler() =
+        DotnetBasedCoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName)
+}
+
+internal object DotnetBasedSchedulerNoHC : SchedulerCoroutineDispatcher(
+    CORE_POOL_SIZE, MAX_POOL_SIZE,
+    IDLE_WORKER_KEEP_ALIVE_NS, "DotnetBasedCoroutineSchedulerNoHC"
+) {
+    override fun createScheduler() =
+        DotnetBasedCoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName, enableHillClimbing = false)
+}
+
+internal object DotnetBasedSchedulerLinearGain : SchedulerCoroutineDispatcher(
+    CORE_POOL_SIZE, MAX_POOL_SIZE,
+    IDLE_WORKER_KEEP_ALIVE_NS, "DotnetBasedCoroutineSchedulerLinearGain"
+) {
+    override fun createScheduler() =
+        DotnetBasedCoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName, hillClimbingGainExponent = 1.0)
+}
+
+internal object DotnetBasedSchedulerLinearGainFast : SchedulerCoroutineDispatcher(
+    CORE_POOL_SIZE, MAX_POOL_SIZE,
+    IDLE_WORKER_KEEP_ALIVE_NS, "DotnetBasedCoroutineSchedulerLinearGainFast"
+) {
+    override fun createScheduler() =
+        DotnetBasedCoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName, hillClimbingGainExponent = 1.0, hillClimbingMaxChangePerSecond = 16)
+}
+
+internal object KotlinBasedSchedulerWithPredictionPolicy : SchedulerCoroutineDispatcher(
+    CORE_POOL_SIZE, MAX_POOL_SIZE,
+    IDLE_WORKER_KEEP_ALIVE_NS, "KotlinBasedCoroutineSchedulerWithPredictionPolicy"
+) {
+    override fun createScheduler() =
+        CoroutineScheduler(corePoolSize, maxPoolSize, idleWorkerKeepAliveNs, schedulerName, usePredictionPolicy = true)
 }

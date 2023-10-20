@@ -69,10 +69,23 @@ public actual object Dispatchers {
     public val IO: CoroutineDispatcher = DefaultIoScheduler
 
     @JvmStatic
-    public val GoBased: CoroutineDispatcher = GoBasedScheduler
+    public actual val GoBased: CoroutineDispatcher = GoBasedScheduler
 
     @JvmStatic
-    public val DotnetBased: CoroutineDispatcher = DotnetBasedScheduler
+    public actual val DotnetBased: CoroutineDispatcher = DotnetBasedScheduler
+
+    @JvmStatic
+    public actual val DotnetBasedNoHC: CoroutineDispatcher = DotnetBasedSchedulerNoHC
+
+    @JvmStatic
+    public actual val DotnetBasedLinearGain: CoroutineDispatcher = DotnetBasedSchedulerLinearGain
+
+    @JvmStatic
+    public actual val DotnetBasedLinearGainFast: CoroutineDispatcher = DotnetBasedSchedulerLinearGainFast
+
+    @JvmStatic
+    public actual val KotlinBasedWithPredictionPolicy: CoroutineDispatcher = KotlinBasedSchedulerWithPredictionPolicy
+
 
     /**
      * Shuts down built-in dispatchers, such as [Default] and [IO],

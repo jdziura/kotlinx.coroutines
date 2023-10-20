@@ -43,7 +43,10 @@ internal inline val Task.maskForStealingMode: Int
  * Indeed, it formally has ABA-problem, but the whole processing logic is written in the way that such ABA is harmless.
  * I have discovered a truly marvelous proof of this, which this KDoc is too narrow to contain.
  */
-internal class WorkQueue {
+internal class WorkQueue(
+    private val delayable: Boolean = true,
+    private val dispatchSampler: DispatchSampler? = null
+) {
 
     /*
      * We read two independent counter here.
@@ -107,6 +110,7 @@ internal class WorkQueue {
         }
         buffer.lazySet(nextIndex, task)
         producerIndex.incrementAndGet()
+        dispatchSampler?.notifyDispatch()
         return null
     }
 
@@ -207,10 +211,12 @@ internal class WorkQueue {
             }
 
             // TODO time wraparound ?
-            val time = schedulerTimeSource.nanoTime()
-            val staleness = time - lastScheduled.submissionTime
-            if (staleness < WORK_STEALING_TIME_RESOLUTION_NS) {
-                return WORK_STEALING_TIME_RESOLUTION_NS - staleness
+            if (delayable) {
+                val time = schedulerTimeSource.nanoTime()
+                val staleness = time - lastScheduled.submissionTime
+                if (staleness < WORK_STEALING_TIME_RESOLUTION_NS) {
+                    return WORK_STEALING_TIME_RESOLUTION_NS - staleness
+                }
             }
 
             /*
