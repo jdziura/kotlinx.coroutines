@@ -33,7 +33,7 @@ import java.util.concurrent.ThreadLocalRandom
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
 open class ChannelProducerConsumerBenchmark {
-    @Param("FORK_JOIN", "KOTLIN_DEFAULT", "KOTLIN_PREDICTION", "GO", "DOTNET_DEFAULT", "DOTNET_NO_HC", "DOTNET_LINEAR_GAIN", "DOTNET_LINEAR_GAIN_FAST",)
+    @Param("FORK_JOIN", "KOTLIN_DEFAULT", "KOTLIN_PREDICTION", "DOTNET_DEFAULT", "DOTNET_NO_HC", "DOTNET_LINEAR_GAIN", "DOTNET_LINEAR_GAIN_FAST",)
     private var _0_dispatcher: DispatcherCreator = DispatcherCreator.FORK_JOIN
 
     @Param
