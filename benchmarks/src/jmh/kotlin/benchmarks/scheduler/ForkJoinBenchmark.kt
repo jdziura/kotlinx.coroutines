@@ -46,7 +46,7 @@ open class ForkJoinBenchmark : ParametrizedDispatcherBase() {
 
     lateinit var coefficients: LongArray
 
-    @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp", "ftp_1", "ftp_8")
+    @Param("kotlin_default", "kotlin_prediction", "go", "dotnet_default", "dotnet_no_hc", "dotnet_linear_gain", "dotnet_linear_gain_fast", "fjp")
     override var dispatcher: String = "fjp"
 
     @Setup

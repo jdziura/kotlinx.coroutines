@@ -22,7 +22,7 @@ import java.util.concurrent.*
 @State(Scope.Benchmark)
 open class LaunchBenchmark : ParametrizedDispatcherBase() {
 
-    @Param("scheduler", "go_scheduler", "dotnet_scheduler", "fjp")
+    @Param("kotlin_default", "kotlin_prediction", "dotnet_default", "dotnet_no_hc", "dotnet_linear_gain", "dotnet_linear_gain_fast", "fjp")
     override var dispatcher: String = "fjp"
 
     private val jobsToLaunch = 100

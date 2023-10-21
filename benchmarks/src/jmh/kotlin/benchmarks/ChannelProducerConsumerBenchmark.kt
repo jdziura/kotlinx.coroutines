@@ -33,7 +33,7 @@ import java.util.concurrent.ThreadLocalRandom
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Benchmark)
 open class ChannelProducerConsumerBenchmark {
-    @Param("FORK_JOIN", "KOTLIN_DEFAULT", "GO_BASED", "DOTNET_BASED")
+    @Param("FORK_JOIN", "KOTLIN_DEFAULT", "KOTLIN_PREDICTION", "GO", "DOTNET_DEFAULT", "DOTNET_NO_HC", "DOTNET_LINEAR_GAIN", "DOTNET_LINEAR_GAIN_FAST",)
     private var _0_dispatcher: DispatcherCreator = DispatcherCreator.FORK_JOIN
 
     @Param
@@ -140,8 +140,12 @@ open class ChannelProducerConsumerBenchmark {
 enum class DispatcherCreator(val create: (parallelism: Int) -> CoroutineDispatcher) {
     FORK_JOIN({ parallelism ->  ForkJoinPool(parallelism).asCoroutineDispatcher() }),
     KOTLIN_DEFAULT({ parallelism -> Dispatchers.Default.limitedParallelism(parallelism) }),
-    GO_BASED({ parallelism -> Dispatchers.GoBased.limitedParallelism(parallelism) }),
-    DOTNET_BASED({ parallelism -> Dispatchers.DotnetBased.limitedParallelism(parallelism) })
+    KOTLIN_PREDICTION({ parallelism -> Dispatchers.KotlinBasedWithPredictionPolicy.limitedParallelism(parallelism) }),
+    GO({ parallelism -> Dispatchers.GoBased.limitedParallelism(parallelism) }),
+    DOTNET_DEFAULT({ parallelism -> Dispatchers.DotnetBased.limitedParallelism(parallelism) }),
+    DOTNET_NO_HC({ parallelism -> Dispatchers.DotnetBasedNoHC.limitedParallelism(parallelism) }),
+    DOTNET_LINEAR_GAIN({ parallelism -> Dispatchers.DotnetBasedLinearGain.limitedParallelism(parallelism) }),
+    DOTNET_LINEAR_GAIN_FAST({ parallelism -> Dispatchers.DotnetBasedLinearGainFast.limitedParallelism(parallelism) }),
 }
 
 enum class ChannelCreator(private val capacity: Int) {

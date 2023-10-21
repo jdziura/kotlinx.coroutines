@@ -4,6 +4,7 @@
 
 package benchmarks.scheduler
 
+import benchmarks.*
 import benchmarks.akka.*
 import kotlinx.coroutines.*
 import org.openjdk.jmh.annotations.*
@@ -19,46 +20,16 @@ import kotlin.coroutines.*
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
 @State(Scope.Thread)
-open class DispatchersContextSwitchBenchmark {
+open class DispatchersContextSwitchBenchmark : ParametrizedDispatcherBase() {
     private val nCoroutines = 10000
     private val delayTimeMs = 1L
     private val nRepeatDelay = 10
 
-    private val fjp = ForkJoinPool.commonPool().asCoroutineDispatcher()
-    private val ftp = Executors.newFixedThreadPool(CORES_COUNT - 1).asCoroutineDispatcher()
-
-    @TearDown
-    fun teardown() {
-        ftp.close()
-        (ftp.executor as ExecutorService).awaitTermination(1, TimeUnit.SECONDS)
-    }
+    @Param("kotlin_default", "kotlin_prediction", "go", "dotnet_default", "dotnet_no_hc", "dotnet_linear_gain", "dotnet_linear_gain_fast", "fjp")
+    override var dispatcher: String = "fjp"
 
     @Benchmark
-    fun coroutinesIoDispatcher() =  runBenchmark(Dispatchers.IO)
-
-    @Benchmark
-    fun coroutinesDefaultDispatcher() = runBenchmark(Dispatchers.Default)
-
-    @Benchmark
-    fun coroutinesFjpDispatcher()  = runBenchmark(fjp)
-
-    @Benchmark
-    fun coroutinesFtpDispatcher()  = runBenchmark(ftp)
-
-    @Benchmark
-    fun coroutinesBlockingDispatcher() = runBenchmark(EmptyCoroutineContext)
-
-    @Benchmark
-    fun threads() {
-        val threads = List(nCoroutines) {
-            thread(start = true) {
-                repeat(nRepeatDelay) {
-                    sleep(delayTimeMs)
-                }
-            }
-        }
-        threads.forEach { it.join() }
-    }
+    fun contextSwitchBenchmark() = runBenchmark(coroutineContext)
 
     private fun runBenchmark(dispatcher: CoroutineContext)  = runBlocking {
         repeat(nCoroutines) {
