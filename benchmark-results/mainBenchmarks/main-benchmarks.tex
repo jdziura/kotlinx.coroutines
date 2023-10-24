@@ -1,0 +1,125 @@
+\documentclass{article}
+
+% Packages
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{geometry}
+\usepackage{lipsum} % for generating filler text
+\usepackage{cite}   % for managing references
+\usepackage{booktabs}
+
+% Document settings
+\geometry{a4paper, margin=0.8in}
+\title{Report}
+\date{}
+
+\begin{document}
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/singleComputationSingleRequestor.png}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/singleComputationMultipleRequestors_with_legend.png}
+    \end{subfigure}
+
+    \vspace{1em}
+
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/multipleComputationsSingleRequestor.png}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/multipleComputationsMultipleRequestors.png}
+    \end{subfigure}
+
+    \vspace{1em}
+
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/multipleComputationsUnfair(stateSize=8192)_with_legend.png}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/multipleComputationsUnfair(stateSize=1024)_with_legend.png}
+    \end{subfigure}
+
+    \vspace{1em}
+
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/multipleComputationsFair(stateSize=8192).png}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/multipleComputationsFair(stateSize=1024)_with_legend.png}
+    \end{subfigure}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/independentStateAsync(jobsCount=32).png}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/independentStateAsync(jobsCount=16).png}
+    \end{subfigure}
+
+    \vspace{1em}
+
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/independentStateAsync(jobsCount=8).png}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/independentStateAsync(jobsCount=1)_with_legend.png}
+    \end{subfigure}
+
+    \vspace{1em}
+
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/dependentStateAsync(jobsCount=32).png}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/dependentStateAsync(jobsCount=16).png}
+    \end{subfigure}
+
+    \vspace{1em}
+
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/dependentStateAsync(jobsCount=8).png}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/dependentStateAsync(jobsCount=1)_with_legend.png}
+    \end{subfigure}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/cycledActors(actorStateSize=1)_with_legend.png}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/cycledActors(actorStateSize=1024)_with_legend.png}
+    \end{subfigure}
+
+    \vspace{1em}
+
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/singlePingPong.png}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/coresCountPingPongs_with_legend.png}
+    \end{subfigure}
+
+    \vspace{1em}
+
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/forkJoin_with_legend.png}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\linewidth]{plots/contextSwitchBenchmark.png}
+    \end{subfigure}
+\end{figure}
+
+\end{document}
