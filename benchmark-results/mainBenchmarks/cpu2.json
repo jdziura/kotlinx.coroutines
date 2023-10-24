@@ -1,0 +1,998 @@
+[
+    {
+        "benchmark": "contextSwitchBenchmark",
+        "dispatcher": "kotlin_default",
+        "score": 88.77882340729603,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "contextSwitchBenchmark",
+        "dispatcher": "kotlin_prediction",
+        "score": 85.46368317051282,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "contextSwitchBenchmark",
+        "dispatcher": "go",
+        "score": 97.39915806000002,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "contextSwitchBenchmark",
+        "dispatcher": "dotnet_default",
+        "score": 90.98984334545455,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "contextSwitchBenchmark",
+        "dispatcher": "dotnet_no_hc",
+        "score": 83.00469950897437,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "contextSwitchBenchmark",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 88.69206454999998,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "contextSwitchBenchmark",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 91.66820061666667,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "contextSwitchBenchmark",
+        "dispatcher": "fjp",
+        "score": 91.9249924469697,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "forkJoin",
+        "dispatcher": "kotlin_default",
+        "score": 667.7177426000001,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "forkJoin",
+        "dispatcher": "kotlin_prediction",
+        "score": 667.79762175,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "forkJoin",
+        "dispatcher": "go",
+        "score": 668.0139033,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "forkJoin",
+        "dispatcher": "dotnet_default",
+        "score": 667.74813665,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "forkJoin",
+        "dispatcher": "dotnet_no_hc",
+        "score": 668.99379475,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "forkJoin",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 668.0479849000001,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "forkJoin",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 667.2776726499999,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "forkJoin",
+        "dispatcher": "fjp",
+        "score": 667.6262534,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "hillClimbingBenchmark",
+        "dispatcher": "kotlin_default",
+        "score": 1788.8295381,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "hillClimbingBenchmark",
+        "dispatcher": "kotlin_prediction",
+        "score": 1795.726081375,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "hillClimbingBenchmark",
+        "dispatcher": "go",
+        "score": 1788.0247379500004,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "hillClimbingBenchmark",
+        "dispatcher": "dotnet_default",
+        "score": 149.60039071477183,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "hillClimbingBenchmark",
+        "dispatcher": "dotnet_no_hc",
+        "score": 1786.7116803999998,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "hillClimbingBenchmark",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 116.58722765157604,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "hillClimbingBenchmark",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 66.27342181509943,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "hillClimbingBenchmark",
+        "dispatcher": "fjp",
+        "score": 3567.802990475,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=1)",
+        "dispatcher": "kotlin_default",
+        "score": 35.30301878154904,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=8)",
+        "dispatcher": "kotlin_default",
+        "score": 48.27507808076755,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=16)",
+        "dispatcher": "kotlin_default",
+        "score": 75.25398678570045,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=32)",
+        "dispatcher": "kotlin_default",
+        "score": 118.12827025852087,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=1)",
+        "dispatcher": "kotlin_prediction",
+        "score": 86.95743169861615,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=8)",
+        "dispatcher": "kotlin_prediction",
+        "score": 121.68150431824067,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=16)",
+        "dispatcher": "kotlin_prediction",
+        "score": 152.44272496208816,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=32)",
+        "dispatcher": "kotlin_prediction",
+        "score": 192.78148348967494,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=1)",
+        "dispatcher": "go",
+        "score": 38.684518182946604,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=8)",
+        "dispatcher": "go",
+        "score": 56.61316090539712,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=16)",
+        "dispatcher": "go",
+        "score": 83.25951666190996,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=32)",
+        "dispatcher": "go",
+        "score": 138.68729259544364,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=1)",
+        "dispatcher": "dotnet_default",
+        "score": 33.392147492863174,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=8)",
+        "dispatcher": "dotnet_default",
+        "score": 64.62902512226451,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=16)",
+        "dispatcher": "dotnet_default",
+        "score": 97.89281343841216,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=32)",
+        "dispatcher": "dotnet_default",
+        "score": 157.64675612557502,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=1)",
+        "dispatcher": "dotnet_no_hc",
+        "score": 37.259663568831584,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=8)",
+        "dispatcher": "dotnet_no_hc",
+        "score": 45.48327267832049,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=16)",
+        "dispatcher": "dotnet_no_hc",
+        "score": 77.7812183068992,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=32)",
+        "dispatcher": "dotnet_no_hc",
+        "score": 122.7277616570173,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=1)",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 33.880619826232774,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=8)",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 62.180211897220076,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=16)",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 98.33855672164914,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=32)",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 157.47795636822545,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=1)",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 33.56727068612118,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=8)",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 60.00979658708602,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=16)",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 93.8779580229855,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=32)",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 159.10666004395847,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=1)",
+        "dispatcher": "fjp",
+        "score": 34.9191454802076,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=8)",
+        "dispatcher": "fjp",
+        "score": 54.11102653335943,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=16)",
+        "dispatcher": "fjp",
+        "score": 83.61083700868537,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "dependentStateAsync(jobsCount=32)",
+        "dispatcher": "fjp",
+        "score": 135.16664488584254,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=1)",
+        "dispatcher": "kotlin_default",
+        "score": 35.91476705142971,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=8)",
+        "dispatcher": "kotlin_default",
+        "score": 49.15756720714079,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=1)",
+        "dispatcher": "kotlin_prediction",
+        "score": 86.93052418560808,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=8)",
+        "dispatcher": "kotlin_prediction",
+        "score": 122.58646937262658,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=1)",
+        "dispatcher": "go",
+        "score": 38.92917326495139,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=8)",
+        "dispatcher": "go",
+        "score": 55.06579605270819,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=1)",
+        "dispatcher": "dotnet_default",
+        "score": 32.76052261722674,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=8)",
+        "dispatcher": "dotnet_default",
+        "score": 63.817374602202804,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=1)",
+        "dispatcher": "dotnet_no_hc",
+        "score": 39.69958155208171,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=8)",
+        "dispatcher": "dotnet_no_hc",
+        "score": 46.427344634985594,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=1)",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 31.8605117700898,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=8)",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 63.76660554134163,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=1)",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 32.053954366713825,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=8)",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 63.405052319744996,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=1)",
+        "dispatcher": "fjp",
+        "score": 35.00521277707698,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "independentStateAsync(jobsCount=8)",
+        "dispatcher": "fjp",
+        "score": 53.060285082512735,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=1024)",
+        "dispatcher": "kotlin_default",
+        "score": 182.6502459,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=8192)",
+        "dispatcher": "kotlin_default",
+        "score": 203.5500455466667,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=1024)",
+        "dispatcher": "kotlin_prediction",
+        "score": 642.0281115333333,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=8192)",
+        "dispatcher": "kotlin_prediction",
+        "score": 664.6239725666667,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=1024)",
+        "dispatcher": "go",
+        "score": 180.55279096666663,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=8192)",
+        "dispatcher": "go",
+        "score": 198.21167899111106,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=1024)",
+        "dispatcher": "dotnet_default",
+        "score": 239.03105712000004,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=8192)",
+        "dispatcher": "dotnet_default",
+        "score": 172.47289415460315,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=1024)",
+        "dispatcher": "dotnet_no_hc",
+        "score": 117.72233937685426,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=8192)",
+        "dispatcher": "dotnet_no_hc",
+        "score": 201.62588195999996,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=1024)",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 239.93479986666665,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=8192)",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 166.24031101230156,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=1024)",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 236.59743870666662,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=8192)",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 186.11655822888892,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=1024)",
+        "dispatcher": "fjp",
+        "score": 181.8248514888889,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsFair(stateSize=8192)",
+        "dispatcher": "fjp",
+        "score": 184.9058773777778,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=1024)",
+        "dispatcher": "kotlin_default",
+        "score": 722.8614900666668,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=8192)",
+        "dispatcher": "kotlin_default",
+        "score": 805.4645581666666,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=1024)",
+        "dispatcher": "kotlin_prediction",
+        "score": 2538.5392822,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=8192)",
+        "dispatcher": "kotlin_prediction",
+        "score": 2639.2281646,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=1024)",
+        "dispatcher": "go",
+        "score": 718.2658519333332,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=8192)",
+        "dispatcher": "go",
+        "score": 777.2208480666666,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=1024)",
+        "dispatcher": "dotnet_default",
+        "score": 956.3492908,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=8192)",
+        "dispatcher": "dotnet_default",
+        "score": 739.4441688444443,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=1024)",
+        "dispatcher": "dotnet_no_hc",
+        "score": 372.133639211111,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=8192)",
+        "dispatcher": "dotnet_no_hc",
+        "score": 671.5587890999999,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=1024)",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 936.0991819999999,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=8192)",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 657.5675674222223,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=1024)",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 956.8355502999999,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=8192)",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 747.0795193999999,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=1024)",
+        "dispatcher": "fjp",
+        "score": 720.1727267000001,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsUnfair(stateSize=8192)",
+        "dispatcher": "fjp",
+        "score": 764.3569907666666,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1)",
+        "dispatcher": "kotlin_default",
+        "score": 0.5437701812620847,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1)",
+        "dispatcher": "kotlin_prediction",
+        "score": 0.5939423277401662,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1)",
+        "dispatcher": "go",
+        "score": 0.7357940314256249,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1)",
+        "dispatcher": "dotnet_default",
+        "score": 0.6385750573888866,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1)",
+        "dispatcher": "dotnet_no_hc",
+        "score": 1.1493674714143647,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1)",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 0.636817414143672,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1)",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 0.6325793532365955,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1)",
+        "dispatcher": "fjp",
+        "score": 0.46336606899399835,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1024)",
+        "dispatcher": "kotlin_default",
+        "score": 1.651396294051856,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1024)",
+        "dispatcher": "kotlin_prediction",
+        "score": 1.5748069845200554,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1024)",
+        "dispatcher": "go",
+        "score": 2.0486615418025798,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1024)",
+        "dispatcher": "dotnet_default",
+        "score": 1.392285399104815,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1024)",
+        "dispatcher": "dotnet_no_hc",
+        "score": 3.2055497647909035,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1024)",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 1.390117589460131,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1024)",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 1.367326850992657,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "cycledActors(actorStateSize=1024)",
+        "dispatcher": "fjp",
+        "score": 1.1790653616181208,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "coresCountPingPongs",
+        "dispatcher": "kotlin_default",
+        "score": 40.334607581,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "coresCountPingPongs",
+        "dispatcher": "kotlin_prediction",
+        "score": 43.108006450798754,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "coresCountPingPongs",
+        "dispatcher": "dotnet_default",
+        "score": 49.6486019355362,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "coresCountPingPongs",
+        "dispatcher": "dotnet_no_hc",
+        "score": 44.207291467391315,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "coresCountPingPongs",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 49.809662176233964,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "coresCountPingPongs",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 51.88143789039917,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "coresCountPingPongs",
+        "dispatcher": "fjp",
+        "score": 43.623345773806,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singlePingPong",
+        "dispatcher": "kotlin_default",
+        "score": 25.663447422441685,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singlePingPong",
+        "dispatcher": "kotlin_prediction",
+        "score": 27.453623962339982,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singlePingPong",
+        "dispatcher": "dotnet_default",
+        "score": 29.703074908315507,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singlePingPong",
+        "dispatcher": "dotnet_no_hc",
+        "score": 54.74734390687134,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singlePingPong",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 29.90819369940015,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singlePingPong",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 29.461003197738727,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singlePingPong",
+        "dispatcher": "fjp",
+        "score": 22.346426275687563,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsMultipleRequestors",
+        "dispatcher": "kotlin_default",
+        "score": 20.656197393197278,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsMultipleRequestors",
+        "dispatcher": "kotlin_prediction",
+        "score": 18.847476667070882,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsMultipleRequestors",
+        "dispatcher": "go",
+        "score": 19.627830494966076,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsMultipleRequestors",
+        "dispatcher": "dotnet_default",
+        "score": 20.503057778094107,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsMultipleRequestors",
+        "dispatcher": "dotnet_no_hc",
+        "score": 21.77358949864143,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsMultipleRequestors",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 20.433958041442175,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsMultipleRequestors",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 20.25038428785223,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsMultipleRequestors",
+        "dispatcher": "fjp",
+        "score": 16.922779479658328,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsSingleRequestor",
+        "dispatcher": "kotlin_default",
+        "score": 10.054030367295153,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsSingleRequestor",
+        "dispatcher": "kotlin_prediction",
+        "score": 10.937715514128985,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsSingleRequestor",
+        "dispatcher": "go",
+        "score": 10.306924255779755,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsSingleRequestor",
+        "dispatcher": "dotnet_default",
+        "score": 10.364649541266632,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsSingleRequestor",
+        "dispatcher": "dotnet_no_hc",
+        "score": 20.06726062410531,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsSingleRequestor",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 10.342312267970359,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsSingleRequestor",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 10.262134240444567,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "multipleComputationsSingleRequestor",
+        "dispatcher": "fjp",
+        "score": 16.173896253831707,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationMultipleRequestors",
+        "dispatcher": "kotlin_default",
+        "score": 19.127288888050312,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationMultipleRequestors",
+        "dispatcher": "kotlin_prediction",
+        "score": 18.50367026673401,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationMultipleRequestors",
+        "dispatcher": "go",
+        "score": 17.981945102143733,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationMultipleRequestors",
+        "dispatcher": "dotnet_default",
+        "score": 20.520217369845135,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationMultipleRequestors",
+        "dispatcher": "dotnet_no_hc",
+        "score": 20.913024658244307,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationMultipleRequestors",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 20.114466375078432,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationMultipleRequestors",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 19.998514376392155,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationMultipleRequestors",
+        "dispatcher": "fjp",
+        "score": 32.3765159635215,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationSingleRequestor",
+        "dispatcher": "kotlin_default",
+        "score": 9.805070732891293,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationSingleRequestor",
+        "dispatcher": "kotlin_prediction",
+        "score": 11.55610614314095,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationSingleRequestor",
+        "dispatcher": "go",
+        "score": 10.50506692557987,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationSingleRequestor",
+        "dispatcher": "dotnet_default",
+        "score": 10.268404546161552,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationSingleRequestor",
+        "dispatcher": "dotnet_no_hc",
+        "score": 20.038237205938476,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationSingleRequestor",
+        "dispatcher": "dotnet_linear_gain",
+        "score": 10.366341403729137,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationSingleRequestor",
+        "dispatcher": "dotnet_linear_gain_fast",
+        "score": 10.300572873075547,
+        "num_cores": 2
+    },
+    {
+        "benchmark": "singleComputationSingleRequestor",
+        "dispatcher": "fjp",
+        "score": 8.410477695401493,
+        "num_cores": 2
+    }
+]
